@@ -28,7 +28,7 @@ type InfoMetadata struct {
 
 type Metadata struct {
 	// Foobar   []interface{} `bencode:"announce-list"`
-	Announce     []string           `bencode:"announce"`
+	Announce     string             `bencode:"announce"`
 	AnnounceList [][]string         `bencode:"announce-list"`
 	Comment      string             `bencode:"comment"`
 	CreatedBy    string             `bencode:"created by"`

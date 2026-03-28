@@ -98,11 +98,13 @@ func ParseTorrent(data *[]byte) (*Torrent, error) {
 			announces = append(announces, announceItem)
 		}
 	} else {
-		announces = append(announces, metadata.Announce)
+		announces = append(announces, make([]string, 0))
+		announces[0] = append(announces[0], metadata.Announce)
 	}
 
-	pieces := make([][20]byte, info.PieceLength)
-	for i := int64(0); i < info.PieceLength; i++ {
+	numPieces := len(info.Pieces) / 20
+	pieces := make([][20]byte, numPieces)
+	for i := 0; i < numPieces; i++ {
 		copy(pieces[i][:], info.Pieces[20*i:20*(i+1)])
 	}
 
@@ -133,6 +135,21 @@ func toSHA1(data []byte) []byte {
 	h.Write(data)
 	return h.Sum(nil)
 }
+
+/*
+
+Example bittorrent response from a tracker (compressed) :
+	d
+		8:complete
+			i3651e
+		10:incomplete
+			i385e
+		8:interval
+			i1800e
+		5:peers
+			300:£¬%ËÌyOk‚Ý—. ƒê@_<K+Ô\Ý Ámb^TnÈÕ^ŒAË OŒ*ÈÕ>¥³ÈÕBä)ðþ¸ÐÞ¦Ô/ãÈÕÈuÉæÈÕ
+	e
+*/
 
 func ParseResponse(data []byte) (*Response, error) {
 	meta := &ResponseMetadata{}
