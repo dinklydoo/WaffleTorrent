@@ -1,17 +1,20 @@
 package WaffleTorrent
 
 import (
-	"bytes"
-	"errors"
+	"crypto/sha1"
+	"encoding/binary"
 	"fmt"
-	"strconv"
+	"os"
+	"time"
+
+	"github.com/zeebo/bencode"
 )
 
 /*
 	Parser/Deserializer for a .torrent file with Bencoded data,
 	should return a deserialized Torrent Object for request to Torrent Tracker
 
-	Example BeenCode for Debian (formatted nicely *note this would all be in a single line*):
+	Example Bencode for Debian (formatted nicely *note this would all be in a single line*):
 
 	d
 		8:announce
@@ -34,238 +37,129 @@ import (
 	e
 */
 
-type BencodeTorrent struct {
-	Announce string      `bencode:"announce"`
-	Info     BencodeInfo `bencode:"info"`
-}
+/*
+	Torrent Parser Credit To
+	https://github.com/j-muller/go-torrent-parser/blob/master/utils.go
+	Bencode Parser Credit To
+	"https://github.com/zeebo/bencode"
+*/
 
-type BencodeInfo struct {
-	Length      int    `bencode:"length"`
-	Name        string `bencode:"name"`
-	Pieces      string `bencode:"pieces"`
-	PieceLength int    `bencode:"piece length"`
-}
+func ParseTorrent(data *[]byte) (*Torrent, error) {
 
-func ParseBencodeTorrent(data []byte) (*BencodeTorrent, error) {
-	reader := bytes.NewReader(data)
-
-	b, err := reader.ReadByte()
-	if err != nil {
-		return nil, err
-	}
-	if b != 'd' {
-		return nil, fmt.Errorf("invalid torrent: expected dict ('d'), got %q", b)
-	}
-
-	torrent, err := parseBencodeHeader(reader)
-	if err != nil {
-		return nil, fmt.Errorf("parse header: %w", err)
-	}
-
-	info, err := parseBencodeInfo(reader)
-	if err != nil {
-		return nil, fmt.Errorf("parse info: %w", err)
-	}
-	torrent.Info = *info
-
-	b, err = reader.ReadByte()
-	if err != nil {
-		return nil, err
-	}
-	if b != 'e' {
-		return nil, fmt.Errorf("invalid torrent: expected end dict ('e'), got %q", b)
-	}
-
-	return torrent, nil
-}
-
-func parseBencodeHeader(reader *bytes.Reader) (*BencodeTorrent, error) {
-	var bt BencodeTorrent
-
-	// read announce link
-	err := parseAttribute(reader, "announce")
-	if err != nil {
-		return nil, err
-	}
-	announce_buf, err := readAttribute(reader)
-	if err != nil {
-		return nil, err
-	}
-	bt.Announce = string(*announce_buf)
-
-	return &bt, nil
-}
-
-func parseBencodeInfo(reader *bytes.Reader) (*BencodeInfo, error) {
-	var info BencodeInfo
-
-	err := parseAttribute(reader, "length")
-	if err != nil {
-		return nil, err
-	}
-	length, err := parseInteger(reader)
+	metadata := &Metadata{}
+	err := bencode.DecodeBytes(*data, metadata)
 	if err != nil {
 		return nil, err
 	}
 
-	err = parseAttribute(reader, "name")
-	if err != nil {
-		return nil, err
-	}
-	name_buf, err := readAttribute(reader)
-	if err != nil {
-		return nil, err
-	}
-
-	// read past piece length
-	err = parseAttribute(reader, "piece length")
-	if err != nil {
-		return nil, err
-	}
-	piece_length, err := parseInteger(reader)
+	info := &InfoMetadata{}
+	err = bencode.DecodeBytes(metadata.Info, info)
 	if err != nil {
 		return nil, err
 	}
 
-	err = parseAttribute(reader, "pieces")
-	if err != nil {
-		return nil, err
-	}
-	pieces_buf, err := readAttribute(reader)
-	if err != nil {
-		return nil, err
+	if len(info.NameUtf8) != 0 {
+		info.Name = info.NameUtf8
 	}
 
-	info.Length = length
-	info.Name = string(*name_buf)
-	info.PieceLength = piece_length
-	info.Pieces = string(*pieces_buf)
-	return &info, nil
-}
+	files := make([]*File, 0)
+	total_length := int64(0)
 
-func parseAttribute(reader *bytes.Reader, name string) error {
-	attrName := "__empty__"
-	for attrName != name {
-		b, err := reader.ReadByte()
+	// single file context
+	if info.Length > 0 {
+		files = append(files, &File{
+			Path:   []string{info.Name},
+			Length: info.Length,
+		})
+		total_length = info.Length
+	} else {
+		metadataFiles := make([]*FileMetadata, 0)
+		err = bencode.DecodeBytes(info.Files, &metadataFiles)
 		if err != nil {
-			return err
-		}
-		err = reader.UnreadByte()
-		if err != nil {
-			return err
+			return nil, err
 		}
 
-		switch b {
-		case 'i':
-			{
-				_, err = parseInteger(reader)
-				if err != nil {
-					return fmt.Errorf("invalid torrent: could not find attribute %s", name)
-				}
+		for _, f := range metadataFiles {
+			if len(f.PathUtf8) != 0 {
+				f.Path = f.PathUtf8
 			}
-		case 'l':
-			{
-				err = parseList(reader)
-				if err != nil {
-					return fmt.Errorf("invalid torrent: could not find attribute %s", name)
-				}
-			}
-		case 'd':
-			{
-				// todo can just skip for now
-				_, err = reader.ReadByte()
-				if err != nil {
-					return fmt.Errorf("invalid torrent: could not find attribute %s", name)
-				}
-			}
-		default:
-			{
-				buf, err := readAttribute(reader)
-				if err != nil {
-					return fmt.Errorf("invalid torrent: could not find attribute %s", name)
-				}
-				attrName = string(*buf)
-			}
+			files = append(files, &File{
+				Path:   append([]string{info.Name}, f.Path...),
+				Length: f.Length,
+			})
+			total_length += f.Length
 		}
 	}
-	return nil
+
+	announces := make([][]string, 0)
+
+	if len(metadata.AnnounceList) > 0 {
+		for _, announceItem := range metadata.AnnounceList {
+			announces = append(announces, announceItem)
+		}
+	} else {
+		announces = append(announces, metadata.Announce)
+	}
+
+	pieces := make([][20]byte, info.PieceLength)
+	for i := int64(0); i < info.PieceLength; i++ {
+		copy(pieces[i][:], info.Pieces[20*i:20*(i+1)])
+	}
+
+	return &Torrent{
+		Announce:    announces,
+		Comment:     metadata.Comment,
+		CreatedBy:   metadata.CreatedBy,
+		CreatedAt:   time.Unix(metadata.CreatedAt, 0),
+		Length:      total_length,
+		InfoHash:    toSHA1(metadata.Info),
+		Private:     info.Private == 1,
+		Pieces:      pieces,
+		PieceLength: info.PieceLength,
+		Files:       files,
+	}, nil
 }
 
-func readAttribute(reader *bytes.Reader) (*[]byte, error) {
-	length, err := readNumber(reader)
+func ParseTorrentFromFile(path string) (*Torrent, error) {
+	file, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	b, err := reader.ReadByte()
+	return ParseTorrent(&file)
+}
+
+func toSHA1(data []byte) []byte {
+	h := sha1.New()
+	h.Write(data)
+	return h.Sum(nil)
+}
+
+func ParseResponse(data []byte) (*Response, error) {
+	meta := &ResponseMetadata{}
+	err := bencode.DecodeBytes(data, meta)
 	if err != nil {
 		return nil, err
 	}
-	if b != ':' {
-		return nil, fmt.Errorf("expected ':', got %q", b)
+
+	var peers []Peer
+	// compact mode: 6 bytes per peer
+	for i := 0; i < len(meta.Peers); i += 6 {
+		compact := meta.Peers[6*i : 6*(i+1)]
+
+		ip := fmt.Sprintf("%d.%d.%d.%d", compact[0], compact[1], compact[2], compact[3])
+		port := binary.BigEndian.Uint16(compact[4:6])
+
+		peers = append(peers, Peer{
+			IP:   ip,
+			Port: int(port),
+		})
 	}
 
-	buf := make([]byte, length)
-	_, err = reader.Read(buf)
-	if err != nil {
-		return nil, err
-	}
-	return &buf, nil
-}
-
-// read a number string from reader -> uint32
-func readNumber(reader *bytes.Reader) (int, error) {
-	res := 0
-	b, err := reader.ReadByte()
-	if err != nil {
-		return 0, err
-	}
-	for b >= '0' && b <= '9' { // b is numerical
-		res = 10*res + int(b-'0')
-		b, err = reader.ReadByte()
-		if err != nil {
-			return 0, err
-		}
-	}
-	err = reader.UnreadByte()
-	if err != nil {
-		return 0, err
-	}
-	return res, nil
-}
-
-// parse bencode integer iXXXXXXe
-func parseInteger(reader *bytes.Reader) (int, error) {
-	b, err := reader.ReadByte()
-	if err != nil {
-		return 0, err
-	}
-	if b != 'i' {
-		return 0, errors.New("invalid integer format, expected i ")
-	}
-	res, err := readNumber(reader)
-	if err != nil {
-		return 0, err
-	}
-	b, err = reader.ReadByte()
-	if err != nil {
-		return 0, err
-	}
-	if b != 'e' {
-		return 0, errors.New("invalid integer format, expected closing e ")
-	}
-	return res, nil
-}
-
-func parseList(reader *bytes.Reader) error {
-	return nil
-}
-
-// AUX FUNCTIONS
-
-func (bt BencodeTorrent) Print() {
-	fmt.Println("Announce:" + bt.Announce)
-	fmt.Println("Name:" + bt.Info.Name)
-	fmt.Println("Length:" + strconv.Itoa(bt.Info.Length))
-	fmt.Println("PieceLength:" + strconv.Itoa(bt.Info.PieceLength))
-	fmt.Println("Pieces:" + bt.Info.Pieces[:100] + "...")
+	return &Response{
+		Peers:      peers,
+		Interval:   int(meta.Interval),
+		TrackerId:  meta.TrackerId,
+		Complete:   meta.Complete,
+		Incomplete: meta.Incomplete,
+	}, nil
 }
