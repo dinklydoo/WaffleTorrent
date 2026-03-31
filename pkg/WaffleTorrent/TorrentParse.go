@@ -160,13 +160,14 @@ func ParseResponse(data []byte) (*Response, error) {
 
 	var peers []Peer
 	// compact mode: 6 bytes per peer
-	for i := 0; i < len(meta.Peers); i += 6 {
+	for i := 0; i < len(meta.Peers)/6; i += 6 {
 		compact := meta.Peers[6*i : 6*(i+1)]
 
 		ip := fmt.Sprintf("%d.%d.%d.%d", compact[0], compact[1], compact[2], compact[3])
 		port := binary.BigEndian.Uint16(compact[4:6])
 
 		peers = append(peers, Peer{
+			ID:   "",
 			IP:   ip,
 			Port: int(port),
 		})

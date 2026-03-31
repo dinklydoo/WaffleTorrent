@@ -2,7 +2,6 @@ package WaffleTorrent
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
@@ -11,43 +10,45 @@ import (
 	"strings"
 )
 
-func getPeerList(torrent *Torrent, tier int, port int) ([]Peer, error) {
+func GetPeerList(torrent *Torrent, tier int, port int, peerId string) ([]Peer, error) {
 	if tier >= len(torrent.Announce) {
 		return nil, errors.New("No Peer's found")
 	}
 	trackers := torrent.Announce[tier]
 
-	ch := make(chan *Response)
+	// Buffer go-routines to handle variant response times
+	ch := make(chan *Response, len(trackers))
 	for _, t := range trackers {
 		tracker := t
 		go func() {
-			resp, _ := announceToTracker(torrent, tracker, port)
+			resp, _ := announceToTracker(torrent, tracker, port, peerId)
+			resp.Print()
 			ch <- resp
 		}()
 	}
-	var peerMap map[string]Peer
+	peerMap := make(map[Peer]struct{})
 	for i := 0; i < len(trackers); i++ {
-		resp := <-ch
-		if resp == nil {
+		resp := <-ch // blocks until a tracker finishes request
+		if resp != nil {
 			for _, peer := range resp.Peers {
-				peerMap[peer.ID] = peer
+				peerMap[peer] = struct{}{}
 			}
 		}
 	}
 	var peerList []Peer
-	for _, peer := range peerMap {
+	for peer, _ := range peerMap {
 		peerList = append(peerList, peer)
 	}
 
 	if len(peerList) == 0 {
-		return getPeerList(torrent, tier+1, port)
+		return GetPeerList(torrent, tier+1, port, peerId)
 	}
 
 	return peerList, nil
 }
 
-func announceToTracker(torrent *Torrent, tracker string, port int) (*Response, error) {
-	url, err := constructURL(torrent, tracker, port)
+func announceToTracker(torrent *Torrent, tracker string, port int, peerId string) (*Response, error) {
+	url, err := constructURL(torrent, tracker, port, peerId)
 	if err != nil {
 		return nil, err
 	}
@@ -63,17 +64,15 @@ func announceToTracker(torrent *Torrent, tracker string, port int) (*Response, e
 	return ParseResponse(body)
 }
 
-func constructURL(torrent *Torrent, tracker string, port int) (string, error) {
+func constructURL(torrent *Torrent, tracker string, port int, peerId string) (string, error) {
 	url, err := url2.Parse(tracker)
 	if err != nil {
 		return "", err
 	}
 
-	peer_id := generatePeerId()
-
 	params := url.Query()
-	params.Set("info_hash", urlByteEncode([]byte(torrent.InfoHash)))
-	params.Set("peer_id", peer_id)
+	params.Set("info_hash", string(torrent.InfoHash))
+	params.Set("peer_id", peerId)
 	params.Set("port", strconv.Itoa(port))
 	params.Set("uploaded", "0")
 	params.Set("downloaded", "0")
@@ -84,24 +83,7 @@ func constructURL(torrent *Torrent, tracker string, port int) (string, error) {
 	return url.String(), nil
 }
 
-func urlByteEncode(bytes []byte) string {
-	var result strings.Builder
-
-	for _, b := range bytes {
-		if (b >= 'a' && b <= 'z') ||
-			(b >= 'A' && b <= 'Z') ||
-			(b >= '0' && b <= '9') ||
-			b == '-' || b == '.' || b == '_' || b == '~' {
-			result.WriteByte(b)
-		} else {
-			result.WriteString(fmt.Sprintf("%%%02X", b))
-		}
-	}
-
-	return result.String()
-}
-
-func generatePeerId() string {
+func GeneratePeerId() string {
 	var result strings.Builder
 	result.WriteString("-WAFFLE-") // not following format but idc :)
 	for i := 0; i < 12; i++ {
