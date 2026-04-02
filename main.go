@@ -1,7 +1,7 @@
 package main
 
 import (
-	"WaffleTorrent/pkg/WaffleTorrent"
+	"WaffleTorrent/pkg/WaffleTorrent/Tracker"
 	"fmt"
 	"log"
 	"net"
@@ -13,7 +13,7 @@ func main() {
 
 	torrent_path := args[0]
 
-	torrent, err := WaffleTorrent.ParseTorrentFromFile(torrent_path)
+	torrent, err := Tracker.ParseTorrentFromFile(torrent_path)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -33,8 +33,8 @@ func main() {
 	}
 	defer listener.Close()
 
-	peerId := WaffleTorrent.GeneratePeerId()
-	_, err = WaffleTorrent.GetPeerList(torrent, 0, 6881, peerId) // 6881-6889
+	peerId := Tracker.GeneratePeerId()
+	_, err = Tracker.GetPeerList(torrent, 0, 6881, peerId) // 6881-6889
 	if err != nil {
 		log.Fatal(err)
 	}

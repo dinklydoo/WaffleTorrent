@@ -1,0 +1,46 @@
+package Peer
+
+import "fmt"
+
+type Peer struct {
+	ID   string // kinda not used in compress format, peers identifiable by IP:Port
+	IP   string
+	Port int
+}
+
+type PeerConnection struct {
+	Peer           *Peer
+	AmChoking      bool
+	AmInterested   bool
+	PeerChoking    bool
+	PeerInterested bool
+}
+
+type Response struct {
+	Peers      []Peer
+	Interval   int
+	TrackerId  string
+	Complete   int
+	Incomplete int
+}
+
+// DEBUG METHODS
+
+func (resp Response) Print() {
+	fmt.Println("Response: ")
+	fmt.Printf("TrackerId: %s\n", resp.TrackerId)
+	fmt.Printf("Interval: %d\n", resp.Interval)
+	fmt.Printf("Complete(Seeds): %d\n", resp.Complete)
+	fmt.Printf("InComplete: %d\n", resp.Incomplete)
+	fmt.Println("Peers: ")
+	for _, peer := range resp.Peers {
+		fmt.Print("\t")
+		peer.Print()
+	}
+}
+
+func (peer Peer) Print() {
+	fmt.Printf("Peer: %s\n", peer.ID)
+	fmt.Printf("\tPort: %d\n", peer.Port)
+	fmt.Printf("\tIP: %s\n", peer.IP)
+}

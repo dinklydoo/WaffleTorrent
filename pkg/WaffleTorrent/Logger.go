@@ -1,6 +1,8 @@
 package WaffleTorrent
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func (torrent Torrent) Print() {
 	fmt.Println("Announce:")
@@ -23,23 +25,4 @@ func (torrent Torrent) Print() {
 		}
 		fmt.Printf("\t%x\n", piece)
 	}
-}
-
-func (resp Response) Print() {
-	fmt.Println("Response: ")
-	fmt.Printf("TrackerId: %s\n", resp.TrackerId)
-	fmt.Printf("Interval: %d\n", resp.Interval)
-	fmt.Printf("Complete(Seeds): %d\n", resp.Complete)
-	fmt.Printf("InComplete: %d\n", resp.Incomplete)
-	fmt.Println("Peers: ")
-	for _, peer := range resp.Peers {
-		fmt.Print("\t")
-		peer.Print()
-	}
-}
-
-func (peer Peer) Print() {
-	fmt.Printf("Peer: %s\n", peer.ID)
-	fmt.Printf("\tPort: %d\n", peer.Port)
-	fmt.Printf("\tIP: %s\n", peer.IP)
 }
