@@ -6,14 +6,15 @@ type Peer struct {
 	ID   string // kinda not used in compress format, peers identifiable by IP:Port
 	IP   string
 	Port int
+	Conn *PeerConnection
 }
 
 type PeerConnection struct {
-	Peer           *Peer
 	AmChoking      bool
 	AmInterested   bool
 	PeerChoking    bool
 	PeerInterested bool
+	Bitfield       []byte
 }
 
 type Response struct {

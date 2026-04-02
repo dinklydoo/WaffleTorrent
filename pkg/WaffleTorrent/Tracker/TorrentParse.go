@@ -2,6 +2,7 @@ package Tracker
 
 import (
 	"WaffleTorrent/pkg/WaffleTorrent"
+	"WaffleTorrent/pkg/WaffleTorrent/Peer"
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
@@ -153,14 +154,14 @@ Example bittorrent response from a tracker (compressed) :
 	e
 */
 
-func ParseResponse(data []byte) (*WaffleTorrent.Response, error) {
+func ParseResponse(data []byte) (*Peer.Response, error) {
 	meta := &ResponseMetadata{}
 	err := bencode.DecodeBytes(data, meta)
 	if err != nil {
 		return nil, err
 	}
 
-	var peers []WaffleTorrent.Peer
+	var peers []Peer.Peer
 	// compact mode: 6 bytes per peer
 	for i := 0; i < len(meta.Peers)/6; i += 6 {
 		compact := meta.Peers[6*i : 6*(i+1)]
@@ -168,14 +169,15 @@ func ParseResponse(data []byte) (*WaffleTorrent.Response, error) {
 		ip := fmt.Sprintf("%d.%d.%d.%d", compact[0], compact[1], compact[2], compact[3])
 		port := binary.BigEndian.Uint16(compact[4:6])
 
-		peers = append(peers, WaffleTorrent.Peer{
+		peers = append(peers, Peer.Peer{
 			ID:   "",
 			IP:   ip,
 			Port: int(port),
+			Conn: nil,
 		})
 	}
 
-	return &WaffleTorrent.Response{
+	return &Peer.Response{
 		Peers:      peers,
 		Interval:   int(meta.Interval),
 		TrackerId:  meta.TrackerId,

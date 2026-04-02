@@ -2,7 +2,7 @@ package Sched
 
 import "WaffleTorrent/pkg/WaffleTorrent"
 
-type PeerId string
+type PeerSlot int
 type UpdateType uint8
 type CommandType uint8
 
@@ -10,6 +10,8 @@ const (
 	PeerSuccess  UpdateType = 0
 	PeerFailed   UpdateType = 1
 	PeerBitfield UpdateType = 2
+	PeerDied     UpdateType = 3
+	PeerAttached UpdateType = 4
 )
 
 const (
@@ -27,13 +29,13 @@ type TorrentScheduler struct {
 
 	UpdateChan  chan *PeerUpdate // work queue -> goroutines pull work from this
 	RequestChan chan *PeerRequest
-	PeerChan    map[PeerId]chan *PeerCommand // update queue -> scheduler pulls updates from this
+	PeerChan    []chan *PeerCommand // update queue -> scheduler pulls updates from this
 }
 
 // peer requests work from the scheduler -> scheduler requests for the rarest piece from this peer
 
 type PeerRequest struct { // signal for work
-	PeerID PeerId
+	PeerSlot PeerSlot
 }
 
 type PeerCommand struct {

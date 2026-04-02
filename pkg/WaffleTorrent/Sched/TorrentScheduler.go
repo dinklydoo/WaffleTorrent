@@ -22,7 +22,7 @@ func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, port
 
 		UpdateChan:  make(chan *PeerUpdate, maxUpdates),
 		RequestChan: make(chan *PeerRequest, maxPeers),
-		PeerChan:    make(map[PeerId]chan *PeerCommand, maxPeers),
+		PeerChan:    make([]chan *PeerCommand, maxPeers),
 	}
 	RunPeerConnections(peers, sched, port, peerId)
 
@@ -30,18 +30,22 @@ func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, port
 }
 
 func RunPeerConnections(peers []Peer.Peer, sched *TorrentScheduler, port int, peerId string) {
-	ch := make(chan struct{}, maxPeers)
-	for _, peer := range peers {
-		ch <- struct{}{} // acquire slot
-		go func(p *Peer.Peer, s *TorrentScheduler, port int, peerId string) {
-			defer func() { <-ch }() // release slot
-			err := p.HandlePeer(s.Torrent.InfoHash, port, peerId)
-			// handle peer should attach the peer to the scheduler directly
-			if err != nil {
-				// add a disconnect peer method -> reduces fields in scheduler and pulls a new peer in
+	ch := make(chan int, maxPeers)
+	for i := 0; i < maxPeers; i++ { // populate channel with all valid slots in the scheduler
+		ch <- i
+	}
 
-				<-ch // on error -> free the peer from the slot
+	for _, peer := range peers {
+		id := <-ch
+		go func(p *Peer.Peer, s *TorrentScheduler, port int, peerId string) {
+			defer func() {
+				ch <- id
+			}()
+			err := sched.HandlePeer(&peer, port, peerId, id)
+			if err != nil {
+				// add some form of logging
 			}
+			ch <- id
 		}(&peer, sched, port, peerId)
 	}
 }

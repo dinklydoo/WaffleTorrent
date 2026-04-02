@@ -9,13 +9,13 @@ func (sched TorrentScheduler) ScheduleEnd() {
 		// needs to be asynchronous -> wait for all pieces with timeout
 
 		for pid, _ := range sched.PeerChan {
-			sched.requestAll(pid) // request all missing pieces
+			sched.requestAll(PeerSlot(pid)) // request all missing pieces
 		}
 
 	}
 }
 
-func (sched TorrentScheduler) requestAll(pid PeerId) {
+func (sched TorrentScheduler) requestAll(pid PeerSlot) {
 	com := PeerCommand{}
 	com.Command = CommandGet
 	com.Bitfield = sched.Bitfield

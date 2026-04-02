@@ -2,6 +2,7 @@ package Tracker
 
 import (
 	"WaffleTorrent/pkg/WaffleTorrent"
+	"WaffleTorrent/pkg/WaffleTorrent/Peer"
 	"errors"
 	"io"
 	"math/rand"
@@ -11,14 +12,14 @@ import (
 	"strings"
 )
 
-func GetPeerList(torrent *WaffleTorrent.Torrent, tier int, port int, peerId string) ([]WaffleTorrent.Peer, error) {
+func GetPeerList(torrent *WaffleTorrent.Torrent, tier int, port int, peerId string) ([]Peer.Peer, error) {
 	if tier >= len(torrent.Announce) {
 		return nil, errors.New("No Peer's found")
 	}
 	trackers := torrent.Announce[tier]
 
 	// Buffer go-routines to handle variant response times
-	ch := make(chan *WaffleTorrent.Response, len(trackers))
+	ch := make(chan *Peer.Response, len(trackers))
 	for _, t := range trackers {
 		tracker := t
 		go func() {
@@ -27,7 +28,7 @@ func GetPeerList(torrent *WaffleTorrent.Torrent, tier int, port int, peerId stri
 			ch <- resp
 		}()
 	}
-	peerMap := make(map[WaffleTorrent.Peer]struct{})
+	peerMap := make(map[Peer.Peer]struct{})
 	for i := 0; i < len(trackers); i++ {
 		resp := <-ch // blocks until a tracker finishes request
 		if resp != nil {
@@ -36,7 +37,7 @@ func GetPeerList(torrent *WaffleTorrent.Torrent, tier int, port int, peerId stri
 			}
 		}
 	}
-	var peerList []WaffleTorrent.Peer
+	var peerList []Peer.Peer
 	for peer, _ := range peerMap {
 		peerList = append(peerList, peer)
 	}
@@ -48,7 +49,7 @@ func GetPeerList(torrent *WaffleTorrent.Torrent, tier int, port int, peerId stri
 	return peerList, nil
 }
 
-func announceToTracker(torrent *WaffleTorrent.Torrent, tracker string, port int, peerId string) (*WaffleTorrent.Response, error) {
+func announceToTracker(torrent *WaffleTorrent.Torrent, tracker string, port int, peerId string) (*Peer.Response, error) {
 	url, err := constructURL(torrent, tracker, port, peerId)
 	if err != nil {
 		return nil, err

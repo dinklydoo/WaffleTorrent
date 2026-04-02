@@ -1,6 +1,8 @@
-package Peer
+package Sched
 
 import (
+	"WaffleTorrent/pkg/WaffleTorrent/Peer"
+	"bufio"
 	"bytes"
 	"fmt"
 	"net"
@@ -9,20 +11,49 @@ import (
 	"time"
 )
 
-func (p Peer) HandlePeer(infoHash []byte, port int, peerId string) error {
+func (sched TorrentScheduler) HandlePeer(p *Peer.Peer, port int, peerId string, slot int) error {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", p.IP, p.Port))
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	_ = &PeerConnection{&p, true, false, true, false}
+	pc := Peer.PeerConnection{true, false, true, false, make([]byte, sched.PieceCount)}
+	p.Conn = &pc
 
-	err = torrentHandshake(&conn, peerId, infoHash)
+	err = torrentHandshake(&conn, peerId, sched.Torrent.InfoHash)
 	if err != nil {
 		return err
 	}
-	// now we can receive messages after handshake passes
 
+	updateChan := &sched.UpdateChan
+	reqChan := &sched.RequestChan
+	workChan := &sched.PeerChan[slot]
+
+	// now we can receive messages after handshake passes
+	reader := bufio.NewReader(conn)
+
+	// TODO: send attach message to sched
+
+	// parse first message
+	msg, err := Peer.ParseMessage(reader, sched.Torrent)
+	if err != nil {
+		return err
+	}
+	if msg.Type() == Peer.Bitfield {
+
+	} else { // peer is a seeder -> has all pieces
+
+	}
+
+	for true {
+		_, err = Peer.ParseMessage(reader, sched.Torrent)
+		if err != nil {
+			return err // immediately drop this peer -> data is not trustworthy
+		}
+		break
+	}
+
+	// TODO: send kill message to scheduler
 	return nil
 }
 
@@ -109,8 +140,4 @@ func verifyHandshake(response []byte, infoHash []byte) error {
 		return err
 	}
 	return nil // looks good to me, peace out
-}
-
-func (p Peer) readMessage() {
-
 }
