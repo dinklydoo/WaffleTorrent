@@ -49,7 +49,7 @@ type PeerUninterested struct {
 
 type PeerBitfield struct {
 	PeerBase
-	Bitfield []byte
+	Bitfield []bool
 }
 
 // TODO : used when we don't leech only

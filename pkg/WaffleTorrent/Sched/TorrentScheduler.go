@@ -7,14 +7,15 @@ import (
 )
 
 const (
-	maxPeers   = 250
-	maxUpdates = 400
+	maxPeers   = 100
+	maxUpdates = 250
 )
 
 func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, port int, peerId string, listener *net.Listener) error {
 	pieceCount := len(torrent.Pieces)
 	sched := &TorrentScheduler{
 		Torrent:    torrent,
+		Pieces:     make([][]byte, pieceCount),
 		Bitfield:   make([]bool, pieceCount),
 		Holders:    make([]int, pieceCount),
 		InFlight:   make([]int, pieceCount),
@@ -23,6 +24,7 @@ func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, port
 		UpdateChan:  make(chan *PeerUpdate, maxUpdates),
 		RequestChan: make(chan *PeerRequest, maxPeers),
 		PeerChan:    make([]chan *PeerCommand, maxPeers),
+		ActiveChan:  make([]bool, maxPeers),
 	}
 	RunPeerConnections(peers, sched, port, peerId)
 
@@ -41,7 +43,7 @@ func RunPeerConnections(peers []Peer.Peer, sched *TorrentScheduler, port int, pe
 			defer func() {
 				ch <- id
 			}()
-			err := sched.HandlePeer(&peer, port, peerId, id)
+			err := sched.HandlePeer(&peer, port, peerId, PeerSlot(id))
 			if err != nil {
 				// add some form of logging
 			}

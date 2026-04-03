@@ -1,143 +1,135 @@
 package Sched
 
 import (
+	"WaffleTorrent/pkg/WaffleTorrent"
 	"WaffleTorrent/pkg/WaffleTorrent/Peer"
 	"bufio"
-	"bytes"
 	"fmt"
 	"net"
-	"slices"
-	"strings"
 	"time"
 )
 
-func (sched TorrentScheduler) HandlePeer(p *Peer.Peer, port int, peerId string, slot int) error {
+func (sched TorrentScheduler) HandlePeer(p *Peer.Peer, port int, peerId string, slot PeerSlot) error {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", p.IP, p.Port))
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	pc := Peer.PeerConnection{true, false, true, false, make([]byte, sched.PieceCount)}
+
+	pc := Peer.PeerConnection{
+		AmChoking:      true,
+		AmInterested:   false,
+		PeerChoking:    true,
+		PeerInterested: false,
+		Bitfield:       make([]bool, sched.PieceCount),
+	}
 	p.Conn = &pc
 
-	err = torrentHandshake(&conn, peerId, sched.Torrent.InfoHash)
+	err = Peer.TorrentHandshake(&conn, peerId, sched.Torrent.InfoHash)
 	if err != nil {
 		return err
 	}
-
-	updateChan := &sched.UpdateChan
-	reqChan := &sched.RequestChan
-	workChan := &sched.PeerChan[slot]
-
-	// now we can receive messages after handshake passes
+	err = conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
+	if err != nil {
+		return err
+	}
 	reader := bufio.NewReader(conn)
 
-	// TODO: send attach message to sched
+	readch := make(chan Peer.PeerMessage) // read channel : buffer reads for io mux
+	comch := sched.PeerChan[slot]
+
+	sched.attachPeer(slot) // --- ATTACH PEER
 
 	// parse first message
 	msg, err := Peer.ParseMessage(reader, sched.Torrent)
 	if err != nil {
 		return err
 	}
-	if msg.Type() == Peer.Bitfield {
+	sched.peerFirstMsg(msg, slot, readch)
 
-	} else { // peer is a seeder -> has all pieces
+	var cons PieceConstructor
+	cons.Init(sched.Torrent.PieceLength) // initialize constructor size
 
-	}
+	// socket reader loop
+	go func(reader *bufio.Reader, torrent *WaffleTorrent.Torrent) {
+		for {
+			err := conn.SetReadDeadline(time.Now().Add(2 * time.Minute)) // refresh read deadline
+			if err != nil {
+				break
+			}
 
-	for true {
-		_, err = Peer.ParseMessage(reader, sched.Torrent)
-		if err != nil {
-			return err // immediately drop this peer -> data is not trustworthy
+			msg, err := Peer.ParseMessage(reader, torrent)
+			if err != nil {
+				break
+			}
+			readch <- msg
 		}
-		break
+	}(reader, sched.Torrent)
+
+loop:
+	for {
+		select { // io mux with read and command channel
+
+		case cmd, ok := <-comch:
+			if !ok {
+				break loop
+			}
+
+		case msg, ok := <-readch:
+			if !ok {
+				break loop
+			}
+			p.UpdatePeer(msg) // updates peer metadata
+
+			if cons.CanRequest() && !p.Conn.PeerChoking { // can send a request
+				sched.SendRequest(p.Conn.Bitfield, slot)
+				cons.Waiting = true
+			}
+
+			if msg.Type() == Peer.Piece {
+				cons.AddBlock(msg)
+				if cons.Full() { // piece has been retrieved
+					piece, err := cons.Verify(sched.Torrent.Pieces[cons.PieceIndex])
+					if err != nil {
+						// TODO : send piece drop message
+						break
+					}
+					sched.AddPiece(cons.PieceIndex, piece)
+					cons.Clear()
+				}
+			}
+		}
 	}
+	sched.detachPeer(p, slot) // --- DETACH PEER
 
-	// TODO: send kill message to scheduler
 	return nil
-}
-
-// ESTABLISH PEER CONNECTION
-
-func createHandshake(peerId string, infoHash []byte) string {
-	handshake := strings.Builder{}
-	handshake.WriteString("\x13BitTorrent protocol") // protocol header
-
-	extensions := "\x00\x00\x00\x00\x00\x00\x00\x00" // extension bytes (reserved bytes)
-	handshake.WriteString(extensions)
-
-	handshake.WriteString(string(infoHash)) // infohash
-	handshake.WriteString(peerId)           // peerId
-
-	return handshake.String()
 }
 
 /*
-Initiate the BitTorrent Handshake with a peer, reads
-handshake response from peer and verifies
+We can directly send an update to the scheduler as no commands will come to a new connection
+with no request made
 
-if successful -> returns with no error
-else -> returns an error
+TODO : maybe don't make this a method of the scheduler
 */
-func torrentHandshake(conn *net.Conn, peerId string, infoHash []byte) error {
-	hs := createHandshake(peerId, infoHash)
-
-	timeout := time.Now().Add(5 * time.Second)
-	err := (*conn).SetDeadline(timeout)
-	if err != nil {
-		return err
+func (sched TorrentScheduler) peerFirstMsg(msg Peer.PeerMessage, slot PeerSlot, readch chan Peer.PeerMessage) {
+	switch msg.Type() {
+	case Peer.Bitfield:
+		t := msg.(*Peer.PeerBitfield)
+		sched.UpdateChan <- &PeerUpdate{
+			UpdateType: PeerBitfield,
+			PeerSlot:   slot,
+			Bitfield:   t.Bitfield,
+		}
+	default: // peer is a seeder
+		seed := make([]bool, sched.PieceCount)
+		for i := range seed {
+			seed[i] = true
+		}
+		sched.UpdateChan <- &PeerUpdate{
+			UpdateType: PeerBitfield,
+			PeerSlot:   slot,
+			Bitfield:   seed,
+		}
+		readch <- msg // enqueue the message again
 	}
-	_, err = (*conn).Write([]byte(hs))
-	if err != nil {
-		return err
-	}
-	response := make([]byte, 16*1024)
-	read, err := (*conn).Read(response)
-	if err != nil {
-		return err
-	}
-	err = verifyHandshake(response[:read], infoHash)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func verifyHandshake(response []byte, infoHash []byte) error {
-	hsLen := 79 // CHANGE THIS TO SOME GLOBAL VAR SO IT'S NOT HARDCODED OR WHATNOT
-	if len(response) != hsLen {
-		return fmt.Errorf("Handshake response length doesn't match, expect %d, got %d", hsLen, len(response))
-	}
-	rstream := bytes.NewBuffer(response)
-	pstrlen, err := rstream.ReadByte()
-	if err != nil {
-		return err
-	}
-	pstr, err := rstream.ReadString(pstrlen)
-	if err != nil {
-		return err
-	}
-	if pstr != "BitTorrent protocol" {
-		return fmt.Errorf("Handshake response is not BitTorrent, response protocol of %s", pstr)
-	}
-
-	rbuf := make([]byte, 8)
-	_, err = rstream.Read(rbuf) // read past reserved bytes
-	if err != nil {
-		return err
-	}
-	recHash := make([]byte, 20)
-	_, err = rstream.Read(recHash)
-	if err != nil {
-		return err
-	}
-	if !slices.Equal(recHash, infoHash) {
-		return fmt.Errorf("InfoHash mismatch, response hash of %s", infoHash)
-	}
-	peerId := make([]byte, 20)
-	_, err = rstream.Read(peerId)
-	if err != nil {
-		return err
-	}
-	return nil // looks good to me, peace out
 }

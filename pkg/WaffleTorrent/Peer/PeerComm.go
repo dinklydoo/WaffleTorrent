@@ -5,11 +5,27 @@ import (
 	"bufio"
 	"encoding/binary"
 	"errors"
+	"io"
 )
+
+func (p *Peer) UpdatePeer(msg PeerMessage) {
+	switch msg.Type() {
+	case Choke:
+		p.Conn.PeerChoking = true
+	case Unchoke:
+		p.Conn.PeerChoking = false
+	case Interested:
+		p.Conn.PeerInterested = true
+	case Bitfield:
+		t := msg.(*PeerBitfield)
+		copy(p.Conn.Bitfield[:], t.Bitfield[:])
+	default:
+	}
+}
 
 func ParseMessage(reader *bufio.Reader, torrent *WaffleTorrent.Torrent) (PeerMessage, error) {
 	lengthBuf := make([]byte, 4)
-	_, err := reader.Read(lengthBuf)
+	_, err := io.ReadFull(reader, lengthBuf)
 	if err != nil {
 		return nil, err
 	}
@@ -52,16 +68,28 @@ func parseBitfield(reader *bufio.Reader, length uint32, pieceCount int) (*PeerBi
 	}
 	msg := new(PeerBitfield)
 	msg.messageType = Bitfield
-	msg.Bitfield = make([]byte, length)
-	_, err := reader.Read(msg.Bitfield)
+
+	rawField := make([]byte, length)
+	msg.Bitfield = make([]bool, pieceCount)
+	_, err := io.ReadFull(reader, rawField)
 	if err != nil {
 		return nil, err
 	}
+
+	hiBit := byte(1 << 7) // byte high bit
+	for i := 0; i < pieceCount; i++ {
+		mask := hiBit >> (i % 8)
+		bi := i / 8
+		msg.Bitfield[i] = (rawField[bi] & mask) != 0
+	}
+
+	// check unset bits for invalidation
 	set := pieceCount % 8
 	if set != 0 {
-		fb := msg.Bitfield[length-1]
+		fb := rawField[length-1]
 		for i := set; i < 8; i++ {
-			if fb&(128>>i) != 0 {
+			check := fb & (hiBit >> i)
+			if check != 0 {
 				return nil, errors.New("bitfield piece set beyond piececount")
 			}
 		}
@@ -69,22 +97,23 @@ func parseBitfield(reader *bufio.Reader, length uint32, pieceCount int) (*PeerBi
 	return msg, nil
 }
 
+// TODO if piece is invalid send a failure message before for the piece then kill message
 func parsePiece(reader *bufio.Reader, length uint32) (*PeerPiece, error) {
 	msg := new(PeerPiece)
 	msg.messageType = Piece
 	buf := make([]byte, 4)
-	_, err := reader.Read(buf)
+	_, err := io.ReadFull(reader, buf)
 	if err != nil {
 		return nil, err
 	}
 	msg.Index = binary.BigEndian.Uint32(buf)
-	_, err = reader.Read(buf)
+	_, err = io.ReadFull(reader, buf)
 	if err != nil {
 		return nil, err
 	}
 	msg.Start = binary.BigEndian.Uint32(buf)
 	msg.Block = make([]byte, length-8)
-	n, err := reader.Read(msg.Block)
+	n, err := io.ReadFull(reader, msg.Block)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +127,7 @@ func parseUnknown(reader *bufio.Reader, length uint32) (*PeerUnkown, error) {
 	msg := new(PeerUnkown)
 	msg.messageType = Unknown
 	buf := make([]byte, length)
-	_, err := reader.Read(buf)
+	_, err := io.ReadFull(reader, buf)
 	if err != nil {
 		return nil, err
 	}

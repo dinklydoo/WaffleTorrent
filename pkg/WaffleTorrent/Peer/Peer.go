@@ -14,7 +14,7 @@ type PeerConnection struct {
 	AmInterested   bool
 	PeerChoking    bool
 	PeerInterested bool
-	Bitfield       []byte
+	Bitfield       []bool
 }
 
 type Response struct {
@@ -40,8 +40,8 @@ func (resp Response) Print() {
 	}
 }
 
-func (peer Peer) Print() {
-	fmt.Printf("Peer: %s\n", peer.ID)
-	fmt.Printf("\tPort: %d\n", peer.Port)
-	fmt.Printf("\tIP: %s\n", peer.IP)
+func (p *Peer) Print() {
+	fmt.Printf("Peer: %s\n", p.ID)
+	fmt.Printf("\tPort: %d\n", p.Port)
+	fmt.Printf("\tIP: %s\n", p.IP)
 }
