@@ -10,16 +10,17 @@ type UpdateType uint8
 type CommandType uint8
 
 const (
-	PeerSuccess  UpdateType = 0
-	PeerFailed   UpdateType = 1
-	PeerBitfield UpdateType = 2
-	PeerDied     UpdateType = 3
-	PeerAttached UpdateType = 4
+	PeerSuccess UpdateType = iota
+	PeerFailed
+	PeerBitfield
+	PeerDied
+	PeerAttached
 )
 
 const (
-	CommandGet    CommandType = 0
-	CommandCancel CommandType = 1
+	CommandGet CommandType = iota
+	CommandCancel
+	CommandKill
 )
 
 type TorrentScheduler struct {
@@ -30,17 +31,24 @@ type TorrentScheduler struct {
 	InFlight   []int                  // which pieces are being requested
 	PieceCount int                    // total number of pieces
 
-	UpdateChan  chan *PeerUpdate // work queue -> goroutines pull work from this
-	RequestChan chan *PeerRequest
-	PeerChan    []chan *PeerCommand // update queue -> scheduler pulls updates from this
+	UpdateChan  chan *PeerUpdate    // update queue -> scheduler reads peer updates from this
+	RequestChan chan *PeerRequest   // request queue -> scheduler assigns peers work using this, peers request work explicitly
+	PeerChan    []chan *PeerCommand // command queue -> scheduler sends work (command) to requested peers
 	ActiveChan  []bool
 }
 
-func (sched TorrentScheduler) AddPiece(idx int, piece []byte) {
-	sched.Pieces[idx] = piece
-	sched.Bitfield[idx] = true
-	sched.InFlight[idx]--
-	sched.PieceCount++
+func (sched TorrentScheduler) SendSuccess(idx int, piece []byte, slot PeerSlot) {
+	sched.UpdateChan <- &PeerUpdate{
+		UpdateType: PeerSuccess,
+		PeerSlot:   slot,
+		Piece:      idx,
+		BlockData:  piece,
+	}
+	// TODO : do this in scheduler
+	//sched.Pieces[idx] = piece
+	//sched.Bitfield[idx] = true
+	//sched.InFlight[idx]--
+	//sched.PieceCount++
 }
 
 // SendRequest : Send a request to the scheduler for work
@@ -48,6 +56,14 @@ func (sched TorrentScheduler) SendRequest(bitField []bool, slot PeerSlot) {
 	sched.RequestChan <- &PeerRequest{
 		Bitfield: bitField,
 		PeerSlot: slot,
+	}
+}
+
+func (sched TorrentScheduler) SendFailure(piece int, slot PeerSlot) {
+	sched.UpdateChan <- &PeerUpdate{
+		UpdateType: PeerFailed,
+		Piece:      piece,
+		PeerSlot:   slot,
 	}
 }
 
@@ -75,15 +91,16 @@ type PeerRequest struct { // signal for work
 	PeerSlot PeerSlot // what channel to use
 }
 
-type PeerCommand struct {
-	Command  CommandType
-	Bitfield []bool // signal which pieces we wish to retrieve from peer
-}
-
 type PeerUpdate struct {
 	UpdateType UpdateType
 	PeerSlot   PeerSlot
 	Piece      int    // piece index
 	Bitfield   []bool // bitfield -> empty on non bitfield updates
 	BlockData  []byte // non-empty on success message
+}
+type PeerCommand struct {
+	Command CommandType
+	Piece   int // signal which piece we wish to retrieve from peer; -1 if all
+
+	// TODO : maybe remove the -1 above and do a blockwise command
 }

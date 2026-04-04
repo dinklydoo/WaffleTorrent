@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// this function handles all the peer logic -- runs in a SEPERATE goroutine
 func (sched TorrentScheduler) HandlePeer(p *Peer.Peer, port int, peerId string, slot PeerSlot) error {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", p.IP, p.Port))
 	if err != nil {
@@ -57,7 +58,6 @@ func (sched TorrentScheduler) HandlePeer(p *Peer.Peer, port int, peerId string, 
 			if err != nil {
 				break
 			}
-
 			msg, err := Peer.ParseMessage(reader, torrent)
 			if err != nil {
 				break
@@ -71,37 +71,83 @@ loop:
 		select { // io mux with read and command channel
 
 		case cmd, ok := <-comch:
-			if !ok {
-				break loop
-			}
-
-		case msg, ok := <-readch:
-			if !ok {
-				break loop
-			}
-			p.UpdatePeer(msg) // updates peer metadata
-
-			if cons.CanRequest() && !p.Conn.PeerChoking { // can send a request
-				sched.SendRequest(p.Conn.Bitfield, slot)
-				cons.Waiting = true
-			}
-
-			if msg.Type() == Peer.Piece {
-				cons.AddBlock(msg)
-				if cons.Full() { // piece has been retrieved
-					piece, err := cons.Verify(sched.Torrent.Pieces[cons.PieceIndex])
-					if err != nil {
-						// TODO : send piece drop message
-						break
+			{
+				if !ok {
+					break loop
+				}
+				switch cmd.Command {
+				case CommandGet:
+					{
+						b := max(sched.Torrent.PieceLength/WaffleTorrent.BlockSize, maxBuffered)
+						cons.Request(cmd.Piece)
+						for i := int64(0); i < b; i++ {
+							// send request to socket
+							err := cons.Enqueue(&conn)
+							if err != nil {
+								break loop
+							}
+						}
 					}
-					sched.AddPiece(cons.PieceIndex, piece)
-					cons.Clear()
+				case CommandCancel:
+					{
+						err := cons.Cancel(&conn)
+						if err != nil {
+							break loop
+						}
+					}
+				case CommandKill:
+					break loop // literally just kill ourselves
+				}
+			}
+		case msg, ok := <-readch:
+			{
+				if !ok {
+					break loop
+				}
+				p.UpdatePeer(msg) // updates peer metadata
+
+				if cons.CanRequest() && !p.Conn.PeerChoking { // can send a request
+					sched.SendRequest(p.Conn.Bitfield, slot)
+					cons.Waiting = true
+				}
+
+				// Only update event is Piece status, Bitfield is only sent on first message
+				if msg.Type() == Peer.Piece {
+					cons.AddBlock(msg)
+					if cons.Full() { // piece has been retrieved
+						piece, err := cons.Verify(sched.Torrent.Pieces[cons.PieceIndex])
+						if err != nil {
+							break
+						}
+						sched.SendSuccess(cons.PieceIndex, piece, slot)
+						cons.Clear()
+					} else {
+						err := cons.Enqueue(&conn) // fill the pipeline
+						if err != nil {
+							break loop
+						}
+					}
 				}
 			}
 		}
 	}
+	// If we were working on a piece, (scheduler expects a piece from us) -> signal failure
+	if cons.PieceIndex > -1 {
+		sched.SendFailure(cons.PieceIndex, slot)
+		cons.Clear()
+	}
 	sched.detachPeer(p, slot) // --- DETACH PEER
-
+flush: // flush the channel for the next connection
+	for {
+		select {
+		case _, ok := <-sched.PeerChan[slot]:
+			if !ok {
+				break flush
+			}
+		default:
+			break flush
+		}
+	}
 	return nil
 }
 

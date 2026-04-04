@@ -11,6 +11,7 @@ const (
 	Bitfield
 	Request // not used when we leech just for iota
 	Piece
+	Cancel
 	Unknown
 )
 
@@ -42,7 +43,7 @@ type PeerUninterested struct {
 	PeerBase
 }
 
-// TODO : have introduces some issues in bittorrents also not required
+// TODO : "have" introduces some issues in bittorrents also not required
 //type PeerHave struct {
 //	PeerBase
 //}
@@ -52,10 +53,20 @@ type PeerBitfield struct {
 	Bitfield []bool
 }
 
-// TODO : used when we don't leech only
-//type PeerRequest struct {
-//	PeerBase
-//}
+type PeerRequest struct {
+	PeerBase
+	Index uint32
+	Start uint32
+}
+
+type PeerCancel struct {
+	PeerBase
+	Index uint32
+	Start uint32 // future ref for block-wise request/cancel -- endgame strategy
+}
+type PeerKill struct {
+	PeerBase
+}
 
 type PeerPiece struct {
 	PeerBase

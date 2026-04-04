@@ -97,7 +97,6 @@ func parseBitfield(reader *bufio.Reader, length uint32, pieceCount int) (*PeerBi
 	return msg, nil
 }
 
-// TODO if piece is invalid send a failure message before for the piece then kill message
 func parsePiece(reader *bufio.Reader, length uint32) (*PeerPiece, error) {
 	msg := new(PeerPiece)
 	msg.messageType = Piece

@@ -1,5 +1,8 @@
 package Sched
 
+//TODO : ENDGAME STRATEGY TRACK BLOCKS INSTEAD OF PIECES TO INCREASE THROUGHPUT
+//TODO : MULTIPLE PEERS CAN CONTRIBUTE TO THE SAME PIECES
+
 // EndGame Scheduling Strategy
 func (sched TorrentScheduler) ScheduleEnd() {
 	//close(sched.UpdateChan) // not sure if I close this here
@@ -18,7 +21,7 @@ func (sched TorrentScheduler) ScheduleEnd() {
 func (sched TorrentScheduler) requestAll(pid PeerSlot) {
 	com := PeerCommand{}
 	com.Command = CommandGet
-	com.Bitfield = sched.Bitfield
+	com.Piece = -1
 
 	sched.PeerChan[pid] <- &com
 }
