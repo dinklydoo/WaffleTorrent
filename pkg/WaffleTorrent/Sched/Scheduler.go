@@ -3,6 +3,7 @@ package Sched
 import (
 	"WaffleTorrent/pkg/WaffleTorrent"
 	"WaffleTorrent/pkg/WaffleTorrent/Peer"
+	"os"
 )
 
 type PeerSlot int
@@ -25,11 +26,12 @@ const (
 
 type TorrentScheduler struct {
 	Torrent    *WaffleTorrent.Torrent // reference to torrent *for hash verification and file formatting*
-	Pieces     [][]byte               // retrieved piece data move this to a new holder struct
-	Bitfield   []bool                 // which pieces have been retrieved
-	Holders    []int                  // how many peers hold what pieces
-	InFlight   []int                  // which pieces are being requested
-	PieceCount int                    // total number of pieces
+	PieceFile  *os.File
+	Pieces     [][]byte // retrieved piece data move this to a new holder struct
+	Bitfield   []bool   // which pieces have been retrieved
+	Holders    []int    // how many peers hold what pieces
+	InFlight   []int    // which pieces are being requested
+	PieceCount int      // total number of pieces
 
 	UpdateChan  chan *PeerUpdate    // update queue -> scheduler reads peer updates from this
 	RequestChan chan *PeerRequest   // request queue -> scheduler assigns peers work using this, peers request work explicitly
@@ -100,7 +102,5 @@ type PeerUpdate struct {
 }
 type PeerCommand struct {
 	Command CommandType
-	Piece   int // signal which piece we wish to retrieve from peer; -1 if all
-
-	// TODO : maybe remove the -1 above and do a blockwise command
+	Piece   int // signal which piece we wish to retrieve from peer
 }

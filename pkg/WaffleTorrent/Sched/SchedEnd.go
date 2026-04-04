@@ -25,12 +25,3 @@ func (sched TorrentScheduler) requestAll(pid PeerSlot) {
 
 	sched.PeerChan[pid] <- &com
 }
-
-func (sched TorrentScheduler) Finished() bool {
-	for _, have := range sched.Bitfield {
-		if !have {
-			return false
-		}
-	}
-	return true
-}

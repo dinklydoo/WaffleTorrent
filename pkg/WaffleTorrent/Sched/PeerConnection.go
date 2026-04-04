@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// this function handles all the peer logic -- runs in a SEPERATE goroutine
+// HandlePeer : this function handles all the peer logic -- runs in a SEPERATE goroutine
 func (sched TorrentScheduler) HandlePeer(p *Peer.Peer, port int, peerId string, slot PeerSlot) error {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", p.IP, p.Port))
 	if err != nil {

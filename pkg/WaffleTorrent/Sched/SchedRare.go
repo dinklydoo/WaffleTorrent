@@ -8,7 +8,10 @@ run_rare:
 		select {
 		case update := <-sched.UpdateChan:
 			// run logic
-			sched.updateSchedule(update)
+			err := sched.updateSchedule(update)
+			if err != nil {
+				return
+			}
 		default:
 			if sched.switchEndgame() {
 				break run_rare
@@ -28,23 +31,4 @@ func (sched TorrentScheduler) switchEndgame() bool {
 	}
 	// received more than 80 percent of pieces -> endgame now
 	return float64(received) >= 0.8*float64(pc)
-}
-
-func (sched TorrentScheduler) updateSchedule(update *PeerUpdate) {
-	flag := update.UpdateType
-	switch flag {
-	case PeerBitfield:
-		for i, have := range update.Bitfield {
-			if have {
-				sched.Holders[i]++
-			}
-		}
-	case PeerSuccess:
-		sched.Bitfield[update.Piece] = true
-		sched.InFlight[update.Piece]--
-		sched.Holders[update.Piece] = -1
-	case PeerFailed:
-		sched.InFlight[update.Piece]--
-		sched.Holders[update.Piece]-- // this peer is not reliable -> boost priority so other holders can attempt
-	}
 }
