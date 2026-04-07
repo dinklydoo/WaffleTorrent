@@ -13,8 +13,9 @@ const (
 	maxUpdates = 250
 )
 
-func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, port int, peerId string, listener *net.Listener) error {
+func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, peerId string, listener *net.Listener) error {
 	pieceCount := len(torrent.Pieces)
+	InitRQueue(pieceCount)
 	sched := &TorrentScheduler{
 		Torrent:    torrent,
 		PieceFile:  InitPieceFile(torrent.Length),
@@ -32,7 +33,7 @@ func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, port
 	logFile := OpenLogFile()
 	defer logFile.Close()
 
-	RunPeerConnections(peers, sched, port, peerId, logFile)
+	RunPeerConnections(peers, sched, peerId, logFile)
 
 schedLoop:
 	for {
@@ -56,27 +57,26 @@ schedLoop:
 			}
 		}
 	}
-	// TODO : validate pieces
 	return nil
 }
 
-func RunPeerConnections(peers []Peer.Peer, sched *TorrentScheduler, port int, peerId string, logFile *os.File) {
+func RunPeerConnections(peers []Peer.Peer, sched *TorrentScheduler, peerId string, logFile *os.File) {
 	ch := make(chan int, maxPeers)
 	for i := 0; i < maxPeers; i++ { // populate channel with all valid slots in the scheduler
 		ch <- i
 	}
 	for _, peer := range peers {
 		id := <-ch
-		go func(p *Peer.Peer, s *TorrentScheduler, port int, peerId string) {
+		go func(p *Peer.Peer, s *TorrentScheduler, peerId string) {
 			defer func() {
 				ch <- id
 			}()
-			err := sched.HandlePeer(&peer, port, peerId, PeerSlot(id))
+			err := sched.HandlePeer(&peer, peerId, PeerSlot(id))
 			if err != nil {
 				log.Println(err) // append error to logfile
 			}
 			ch <- id
-		}(&peer, sched, port, peerId)
+		}(&peer, sched, peerId)
 	}
 }
 
@@ -111,21 +111,28 @@ func (sched TorrentScheduler) updateSchedule(update *PeerUpdate) error {
 		for i, have := range update.Bitfield {
 			if have {
 				sched.Holders[i]++
+				sched.Rarity(i)
 			}
 		}
 	case PeerSuccess:
+		if sched.Bitfield[update.Piece] { // someone was faster
+			break
+		}
 		sched.Bitfield[update.Piece] = true
 		sched.InFlight[update.Piece]--
+		RQueue.Delete(RItem[update.Piece]) // delete from the queue
 		err := sched.writePiece(update.Piece, update.BlockData)
 		if err != nil {
 			return err
 		}
 	case PeerFailed:
 		sched.InFlight[update.Piece]--
+		sched.Rarity(update.Piece)
 	case PeerDied:
-		for i, b := range update.Bitfield {
-			if b {
+		for i, have := range update.Bitfield {
+			if have {
 				sched.Holders[i]--
+				sched.Rarity(i)
 			}
 		}
 		sched.ActiveChan[update.PeerSlot] = false
@@ -147,7 +154,7 @@ func (sched *TorrentScheduler) writePiece(piece int, data []byte) error {
 }
 
 func (sched TorrentScheduler) handleRequest(request *PeerRequest) {
-	// TODO : implement strategies
+	sched.scheduleRare(request) // TODO : endgame heuristic
 }
 
 func (sched TorrentScheduler) Finished() bool {

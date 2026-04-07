@@ -27,11 +27,10 @@ const (
 type TorrentScheduler struct {
 	Torrent    *WaffleTorrent.Torrent // reference to torrent *for hash verification and file formatting*
 	PieceFile  *os.File
-	Pieces     [][]byte // retrieved piece data move this to a new holder struct
-	Bitfield   []bool   // which pieces have been retrieved
-	Holders    []int    // how many peers hold what pieces
-	InFlight   []int    // which pieces are being requested
-	PieceCount int      // total number of pieces
+	Bitfield   []bool // which pieces have been retrieved
+	Holders    []int  // how many peers hold what pieces
+	InFlight   []int  // which pieces are being requested
+	PieceCount int    // total number of pieces
 
 	UpdateChan  chan *PeerUpdate    // update queue -> scheduler reads peer updates from this
 	RequestChan chan *PeerRequest   // request queue -> scheduler assigns peers work using this, peers request work explicitly

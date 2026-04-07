@@ -1,6 +1,7 @@
 package main
 
 import (
+	"WaffleTorrent/pkg/WaffleTorrent/Sched"
 	"WaffleTorrent/pkg/WaffleTorrent/Tracker"
 	"fmt"
 	"log"
@@ -34,9 +35,13 @@ func main() {
 	defer listener.Close()
 
 	peerId := Tracker.GeneratePeerId()
-	_, err = Tracker.GetPeerList(torrent, 0, 6881, peerId) // 6881-6889
+	peers, err := Tracker.GetPeerList(torrent, 0, 6881, peerId) // 6881-6889
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	err = Sched.RunTorrentScheduler(torrent, peers, peerId, &listener)
+	if err != nil {
+		log.Fatal(err)
+	}
 }

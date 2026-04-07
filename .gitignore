@@ -23,9 +23,13 @@ profile.cov
 # Go workspace file
 go.work
 go.work.sum
+*.bin
+*.log
+WaffleTorrent
 
 # env file
 .env
+/tmp/
 
 # Editor/IDE
  .idea/
