@@ -28,7 +28,7 @@ func TorrentHandshake(conn *net.Conn, peerId string, infoHash []byte) error {
 	if err != nil {
 		return err
 	}
-	response := make([]byte, 16*1024)
+	response := make([]byte, 79)
 	read, err := (*conn).Read(response)
 	if err != nil {
 		return err
@@ -41,20 +41,17 @@ func TorrentHandshake(conn *net.Conn, peerId string, infoHash []byte) error {
 }
 
 func verifyHandshake(response []byte, infoHash []byte) error {
-	hsLen := 79 // CHANGE THIS TO SOME GLOBAL VAR SO IT'S NOT HARDCODED OR WHATNOT
-	if len(response) != hsLen {
-		return fmt.Errorf("Handshake response length doesn't match, expect %d, got %d", hsLen, len(response))
-	}
 	rstream := bytes.NewBuffer(response)
 	pstrlen, err := rstream.ReadByte()
 	if err != nil {
 		return err
 	}
-	pstr, err := rstream.ReadString(pstrlen)
+	pstr := make([]byte, pstrlen)
+	_, err = rstream.Read(pstr)
 	if err != nil {
 		return err
 	}
-	if pstr != "BitTorrent protocol" {
+	if string(pstr) != "BitTorrent protocol" {
 		return fmt.Errorf("Handshake response is not BitTorrent, response protocol of %s", pstr)
 	}
 

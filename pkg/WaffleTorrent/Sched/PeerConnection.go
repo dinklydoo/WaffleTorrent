@@ -28,11 +28,11 @@ func (sched TorrentScheduler) HandlePeer(p *Peer.Peer, peerId string, slot PeerS
 
 	err = Peer.TorrentHandshake(&conn, peerId, sched.Torrent.InfoHash)
 	if err != nil {
-		return err
+		return fmt.Errorf("handshake failed: %s", err)
 	}
 	err = conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
 	if err != nil {
-		return err
+		return fmt.Errorf("connection timeout: %s", err)
 	}
 	reader := bufio.NewReader(conn)
 
@@ -44,14 +44,14 @@ func (sched TorrentScheduler) HandlePeer(p *Peer.Peer, peerId string, slot PeerS
 	// parse first message
 	msg, err := Peer.ParseMessage(reader, sched.Torrent)
 	if err != nil {
-		return err
+		return fmt.Errorf("first parse message failed: %s", err)
 	}
 	sched.peerFirstMsg(msg, slot, readch)
 
 	var cons PieceConstructor
 	cons.Init(sched.Torrent.PieceLength) // initialize constructor size
 
-	// socket reader loop
+	// socket reader loop TODO : add some error log
 	go func(reader *bufio.Reader, torrent *WaffleTorrent.Torrent) {
 		for {
 			err := conn.SetReadDeadline(time.Now().Add(2 * time.Minute)) // refresh read deadline
