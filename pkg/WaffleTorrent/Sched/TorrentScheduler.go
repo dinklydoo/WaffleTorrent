@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	maxPeers   = 100
-	maxUpdates = 250
+	maxPeers    = 100
+	maxUpdates  = 250
+	maxCommands = 10
 )
 
 func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, peerId string, listener *net.Listener) error {
@@ -18,7 +19,7 @@ func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, peer
 	InitRQueue(pieceCount)
 	sched := &TorrentScheduler{
 		Torrent:    torrent,
-		PieceFile:  InitPieceFile(torrent.Length),
+		PieceFile:  InitPieceFile(int64(torrent.Length)),
 		Bitfield:   make([]bool, pieceCount),
 		Holders:    make([]int, pieceCount),
 		InFlight:   make([]int, pieceCount),
@@ -32,6 +33,7 @@ func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, peer
 	// setup logfile
 	logFile := OpenLogFile()
 	defer logFile.Close()
+	log.SetOutput(logFile)
 
 	RunPeerConnections(peers, sched, peerId, logFile)
 
@@ -42,16 +44,17 @@ schedLoop:
 			if !ok {
 				break schedLoop
 			}
+			log.Printf("Scheduler received a request: %d", req.PeerSlot)
 			sched.handleRequest(req)
 		case update, ok := <-sched.UpdateChan:
 			if !ok {
 				break schedLoop
 			}
+			log.Printf("Scheduler received an update: slot %d, id: %d", update.PeerSlot, int(update.UpdateType))
 			err := sched.updateSchedule(update)
 			if err != nil {
 				log.Fatal(err)
 			}
-		default:
 			if sched.Finished() {
 				break schedLoop
 			}
@@ -71,9 +74,12 @@ func RunPeerConnections(peers []Peer.Peer, sched *TorrentScheduler, peerId strin
 			defer func() {
 				ch <- id
 			}()
+			if sched.PeerChan[id] == nil {
+				sched.PeerChan[id] = make(chan *PeerCommand, maxCommands)
+			}
 			err := sched.HandlePeer(&peer, peerId, PeerSlot(id))
 			if err != nil {
-				log.Println(err) // append error to logfile
+				log.Printf("Error handling peer %v: %v", peer, err)
 			}
 			ch <- id
 		}(&peer, sched, peerId)
@@ -81,7 +87,7 @@ func RunPeerConnections(peers []Peer.Peer, sched *TorrentScheduler, peerId strin
 }
 
 func OpenLogFile() *os.File {
-	logFile, err := os.OpenFile("waffle.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile("./tmp/waffle.log", os.O_RDWR|os.O_CREATE|os.O_TRUNC|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatalf("error opening log file: %v", err)
 	}
@@ -93,7 +99,7 @@ Init Scratch Piece File, Just a file to import raw bits
 Does not consider multiple file boundaries in multi-file torrents
 */
 func InitPieceFile(fileSize int64) *os.File {
-	file, err := os.Create("pieces.bin")
+	file, err := os.Create("./tmp/pieces.bin")
 	if err != nil {
 		log.Fatalf("error creating pieces.bin: %v", err)
 	}
@@ -104,7 +110,7 @@ func InitPieceFile(fileSize int64) *os.File {
 	return file
 }
 
-func (sched TorrentScheduler) updateSchedule(update *PeerUpdate) error {
+func (sched *TorrentScheduler) updateSchedule(update *PeerUpdate) error {
 	flag := update.UpdateType
 	switch flag {
 	case PeerBitfield:
@@ -143,21 +149,21 @@ func (sched TorrentScheduler) updateSchedule(update *PeerUpdate) error {
 }
 
 func (sched *TorrentScheduler) writePiece(piece int, data []byte) error {
-	offset := int64(piece) * sched.Torrent.PieceLength
+	offset := uint32(piece) * sched.Torrent.PieceLength
 
-	end := max(offset+sched.Torrent.PieceLength, sched.Torrent.Length)
-	_, err := sched.PieceFile.WriteAt(data[:end], offset)
+	//end := min(offset+sched.Torrent.PieceLength, sched.Torrent.Length)
+	_, err := sched.PieceFile.WriteAt(data[:], int64(offset))
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (sched TorrentScheduler) handleRequest(request *PeerRequest) {
+func (sched *TorrentScheduler) handleRequest(request *PeerRequest) {
 	sched.scheduleRare(request) // TODO : endgame heuristic
 }
 
-func (sched TorrentScheduler) Finished() bool {
+func (sched *TorrentScheduler) Finished() bool {
 	for _, b := range sched.Bitfield {
 		if !b {
 			return false

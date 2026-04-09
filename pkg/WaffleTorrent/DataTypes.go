@@ -5,7 +5,7 @@ import (
 )
 
 // BlockSize : torrent block size 16 KB
-const BlockSize = 16 * 1024
+const BlockSize = uint32(16 * 1024)
 
 type File struct {
 	// Relative path of the file
@@ -29,7 +29,7 @@ type Torrent struct {
 	CreatedAt time.Time
 
 	// Total Length
-	Length int64
+	Length uint32
 
 	// Torrent SHA1
 	InfoHash []byte
@@ -38,7 +38,7 @@ type Torrent struct {
 	Private bool
 
 	// Piece Length
-	PieceLength int64
+	PieceLength uint32
 
 	// Piece Hashes
 	Pieces [][20]byte

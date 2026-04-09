@@ -19,7 +19,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	torrent.Print()
+	//torrent.Print()
 
 	var listener net.Listener
 	for port := 6881; port <= 6889; port++ {

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"log"
 )
 
 func (p *Peer) UpdatePeer(msg PeerMessage) {
@@ -29,8 +30,8 @@ func ParseMessage(reader *bufio.Reader, torrent *WaffleTorrent.Torrent) (PeerMes
 	if err != nil {
 		return nil, err
 	}
-	length := binary.BigEndian.Uint32(lengthBuf) - 1 // length of message - length prefix
-	id, err := reader.ReadByte()
+	length := binary.BigEndian.Uint32(lengthBuf) - 1 // length of message : subtract id byte which we read automatically
+	id, err := reader.ReadByte()                     // the id byte ^^^ (explains -1)
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +58,7 @@ func ParseMessage(reader *bufio.Reader, torrent *WaffleTorrent.Torrent) (PeerMes
 		return parsePiece(reader, length)
 	default:
 		// don't throw just consume the message and continue
+		log.Printf("Unrecognized message type %d", MessageType(id))
 		return parseUnknown(reader, length)
 	}
 }
@@ -112,12 +114,9 @@ func parsePiece(reader *bufio.Reader, length uint32) (*PeerPiece, error) {
 	}
 	msg.Start = binary.BigEndian.Uint32(buf)
 	msg.Block = make([]byte, length-8)
-	n, err := io.ReadFull(reader, msg.Block)
+	_, err = io.ReadFull(reader, msg.Block)
 	if err != nil {
 		return nil, err
-	}
-	if n != len(msg.Block) {
-		return nil, errors.New("message length mismatch")
 	}
 	return msg, nil
 }

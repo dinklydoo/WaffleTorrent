@@ -3,6 +3,7 @@ package Peer
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net"
 	"slices"
 	"strings"
@@ -28,8 +29,8 @@ func TorrentHandshake(conn *net.Conn, peerId string, infoHash []byte) error {
 	if err != nil {
 		return err
 	}
-	response := make([]byte, 79)
-	read, err := (*conn).Read(response)
+	response := make([]byte, 68)
+	read, err := io.ReadFull((*conn), response)
 	if err != nil {
 		return err
 	}
@@ -47,7 +48,7 @@ func verifyHandshake(response []byte, infoHash []byte) error {
 		return err
 	}
 	pstr := make([]byte, pstrlen)
-	_, err = rstream.Read(pstr)
+	_, err = io.ReadFull(rstream, pstr)
 	if err != nil {
 		return err
 	}
@@ -56,12 +57,12 @@ func verifyHandshake(response []byte, infoHash []byte) error {
 	}
 
 	rbuf := make([]byte, 8)
-	_, err = rstream.Read(rbuf) // read past reserved bytes
+	_, err = io.ReadFull(rstream, rbuf) // read past reserved bytes -> don't care about them for now
 	if err != nil {
 		return err
 	}
 	recHash := make([]byte, 20)
-	_, err = rstream.Read(recHash)
+	_, err = io.ReadFull(rstream, recHash)
 	if err != nil {
 		return err
 	}
@@ -69,7 +70,7 @@ func verifyHandshake(response []byte, infoHash []byte) error {
 		return fmt.Errorf("InfoHash mismatch, response hash of %s", infoHash)
 	}
 	peerId := make([]byte, 20)
-	_, err = rstream.Read(peerId)
+	_, err = io.ReadFull(rstream, peerId)
 	if err != nil {
 		return err
 	}

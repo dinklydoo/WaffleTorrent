@@ -38,7 +38,7 @@ type TorrentScheduler struct {
 	ActiveChan  []bool
 }
 
-func (sched TorrentScheduler) SendSuccess(idx int, piece []byte, slot PeerSlot) {
+func (sched *TorrentScheduler) SendSuccess(idx int, piece []byte, slot PeerSlot) {
 	sched.UpdateChan <- &PeerUpdate{
 		UpdateType: PeerSuccess,
 		PeerSlot:   slot,
@@ -53,14 +53,14 @@ func (sched TorrentScheduler) SendSuccess(idx int, piece []byte, slot PeerSlot) 
 }
 
 // SendRequest : Send a request to the scheduler for work
-func (sched TorrentScheduler) SendRequest(bitField []bool, slot PeerSlot) {
+func (sched *TorrentScheduler) SendRequest(bitField []bool, slot PeerSlot) {
 	sched.RequestChan <- &PeerRequest{
 		Bitfield: bitField,
 		PeerSlot: slot,
 	}
 }
 
-func (sched TorrentScheduler) SendFailure(piece int, slot PeerSlot) {
+func (sched *TorrentScheduler) SendFailure(piece int, slot PeerSlot) {
 	sched.UpdateChan <- &PeerUpdate{
 		UpdateType: PeerFailed,
 		Piece:      piece,
@@ -68,7 +68,7 @@ func (sched TorrentScheduler) SendFailure(piece int, slot PeerSlot) {
 	}
 }
 
-func (sched TorrentScheduler) attachPeer(slot PeerSlot) {
+func (sched *TorrentScheduler) attachPeer(slot PeerSlot) {
 	s := PeerUpdate{
 		UpdateType: PeerAttached,
 		PeerSlot:   slot,
@@ -76,7 +76,7 @@ func (sched TorrentScheduler) attachPeer(slot PeerSlot) {
 	sched.UpdateChan <- &s // thread safe attach signal
 }
 
-func (sched TorrentScheduler) detachPeer(p *Peer.Peer, slot PeerSlot) {
+func (sched *TorrentScheduler) detachPeer(p *Peer.Peer, slot PeerSlot) {
 	s := PeerUpdate{
 		UpdateType: PeerDied,
 		PeerSlot:   slot,

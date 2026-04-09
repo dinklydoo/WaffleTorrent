@@ -116,11 +116,11 @@ func ParseTorrent(data *[]byte) (*WaffleTorrent.Torrent, error) {
 		Comment:     metadata.Comment,
 		CreatedBy:   metadata.CreatedBy,
 		CreatedAt:   time.Unix(metadata.CreatedAt, 0),
-		Length:      total_length,
+		Length:      uint32(total_length),
 		InfoHash:    toSHA1(metadata.Info),
 		Private:     info.Private == 1,
 		Pieces:      pieces,
-		PieceLength: info.PieceLength,
+		PieceLength: uint32(info.PieceLength),
 		Files:       files,
 	}, nil
 }

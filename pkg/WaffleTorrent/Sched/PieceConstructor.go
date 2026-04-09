@@ -9,19 +9,19 @@ import (
 	"net"
 )
 
-const maxBuffered = 10 // max requests to a peer at a time
+const maxBuffered = 6 // max requests to a peer at a time
 
 type PieceConstructor struct {
 	PieceIndex int
 	Blocks     [][WaffleTorrent.BlockSize]byte
-	PieceSize  int64
-	Count      int64
-	Waiting    bool // flag if waiting for work
-	Inflight   int  // pipeline requests -> requesting 0...N blocks
+	PieceSize  uint32
+	Count      uint32
+	Waiting    bool   // flag if waiting for work
+	Inflight   uint32 // pipeline requests -> requesting 0...N blocks
 }
 
-func (p *PieceConstructor) Init(pieceSize int64) {
-	blockCount := (2*pieceSize - WaffleTorrent.BlockSize) / WaffleTorrent.BlockSize
+func (p *PieceConstructor) Init(pieceSize uint32) {
+	blockCount := (pieceSize + WaffleTorrent.BlockSize - 1) / WaffleTorrent.BlockSize
 	p.Blocks = make([][WaffleTorrent.BlockSize]byte, blockCount)
 	p.PieceSize = pieceSize
 	p.Count = 0
@@ -31,25 +31,25 @@ func (p *PieceConstructor) Init(pieceSize int64) {
 }
 
 func (p *PieceConstructor) Full() bool {
-	return p.Count == int64(len(p.Blocks))
+	return p.Count == uint32(len(p.Blocks))
 }
 
-func (p *PieceConstructor) Enqueue(conn *net.Conn) error {
-	if p.Inflight == len(p.Blocks) { // pipeline is full
+func (p *PieceConstructor) Enqueue(conn net.Conn) error {
+	if p.Inflight+p.Count >= uint32(len(p.Blocks)) { // pipeline is full
 		return nil
 	}
+	begin := WaffleTorrent.BlockSize * (p.Inflight + p.Count)
+	end := min(begin+WaffleTorrent.BlockSize, p.PieceSize)
 	p.Inflight++
-	begin := WaffleTorrent.BlockSize * p.Inflight
-	end := max(begin+WaffleTorrent.BlockSize, int(p.PieceSize))
 
 	return sendBlock(conn, Peer.Request, p.PieceIndex, begin, end-begin)
 }
 
-func (p *PieceConstructor) Cancel(conn *net.Conn) error {
-	for i := p.Count; i <= int64(p.Inflight); i++ {
+func (p *PieceConstructor) Cancel(conn net.Conn) error {
+	for i := p.Count; i <= p.Inflight; i++ {
 		begin := WaffleTorrent.BlockSize * i
-		end := max(begin+WaffleTorrent.BlockSize, p.PieceSize)
-		err := sendBlock(conn, Peer.Cancel, p.PieceIndex, int(begin), int(end-begin))
+		end := min(begin+WaffleTorrent.BlockSize, p.PieceSize)
+		err := sendBlock(conn, Peer.Cancel, p.PieceIndex, begin, end-begin)
 		if err != nil {
 			return err
 		}
@@ -60,7 +60,7 @@ func (p *PieceConstructor) Cancel(conn *net.Conn) error {
 func (p *PieceConstructor) piece() []byte {
 	piece := make([]byte, p.PieceSize)
 	for i, b := range p.Blocks {
-		start := int64(i * WaffleTorrent.BlockSize)
+		start := uint32(i) * WaffleTorrent.BlockSize
 		end := min(start+WaffleTorrent.BlockSize, p.PieceSize)
 		copy(piece[start:end], b[:])
 	}
@@ -74,14 +74,17 @@ func (p *PieceConstructor) Clear() {
 	p.Inflight = 0
 }
 
-func (p *PieceConstructor) CanRequest() bool {
-	return !p.Waiting && p.PieceIndex == -1
+func (p *PieceConstructor) CanRequest(choked bool) bool {
+	if p.Waiting || p.PieceIndex != -1 || choked {
+		return false
+	}
+	p.Waiting = true
+	return true
 }
 
 func (p *PieceConstructor) Request(idx int) {
 	p.PieceIndex = idx
 	p.Waiting = false
-	p.Inflight = maxBuffered
 }
 
 func (p *PieceConstructor) AddBlock(msg Peer.PeerMessage) {

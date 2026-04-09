@@ -79,7 +79,7 @@ func constructURL(torrent *WaffleTorrent.Torrent, tracker string, port int, peer
 	params.Set("uploaded", "0")
 	params.Set("downloaded", "0")
 	params.Set("compact", "1") // always request compacted torrents -> helps us when parsing
-	params.Set("left", strconv.FormatInt(torrent.Length, 10))
+	params.Set("left", strconv.FormatInt(int64(torrent.Length), 10))
 
 	url.RawQuery = params.Encode()
 	return url.String(), nil

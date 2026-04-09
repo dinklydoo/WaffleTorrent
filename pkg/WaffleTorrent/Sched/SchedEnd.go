@@ -4,7 +4,7 @@ package Sched
 //TODO : MULTIPLE PEERS CAN CONTRIBUTE TO THE SAME PIECES
 
 // EndGame Scheduling Strategy
-func (sched TorrentScheduler) ScheduleEnd() {
+func (sched *TorrentScheduler) ScheduleEnd() {
 	//close(sched.UpdateChan) // not sure if I close this here
 
 	for !sched.Finished() {
@@ -18,7 +18,7 @@ func (sched TorrentScheduler) ScheduleEnd() {
 	}
 }
 
-func (sched TorrentScheduler) requestAll(pid PeerSlot) {
+func (sched *TorrentScheduler) requestAll(pid PeerSlot) {
 	com := PeerCommand{}
 	com.Command = CommandGet
 	com.Piece = -1

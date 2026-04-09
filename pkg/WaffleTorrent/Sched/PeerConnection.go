@@ -5,12 +5,13 @@ import (
 	"WaffleTorrent/pkg/WaffleTorrent/Peer"
 	"bufio"
 	"fmt"
+	"log"
 	"net"
 	"time"
 )
 
 // HandlePeer : this function handles all the peer logic -- runs in a SEPERATE goroutine
-func (sched TorrentScheduler) HandlePeer(p *Peer.Peer, peerId string, slot PeerSlot) error {
+func (sched *TorrentScheduler) HandlePeer(p *Peer.Peer, peerId string, slot PeerSlot) error {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", p.IP, p.Port))
 	if err != nil {
 		return err
@@ -46,11 +47,13 @@ func (sched TorrentScheduler) HandlePeer(p *Peer.Peer, peerId string, slot PeerS
 	if err != nil {
 		return fmt.Errorf("first parse message failed: %s", err)
 	}
+	p.UpdatePeer(msg)
 	sched.peerFirstMsg(msg, slot, readch)
 
 	var cons PieceConstructor
 	cons.Init(sched.Torrent.PieceLength) // initialize constructor size
 
+	// separate the socket reader into a new goroutine
 	// socket reader loop TODO : add some error log
 	go func(reader *bufio.Reader, torrent *WaffleTorrent.Torrent) {
 		for {
@@ -78,11 +81,12 @@ loop:
 				switch cmd.Command {
 				case CommandGet:
 					{
-						b := max(sched.Torrent.PieceLength/WaffleTorrent.BlockSize, maxBuffered)
+						log.Printf("%s received command GET %d", p.ID, cmd.Piece)
+						b := min(sched.Torrent.PieceLength/WaffleTorrent.BlockSize, maxBuffered)
 						cons.Request(cmd.Piece)
-						for i := int64(0); i < b; i++ {
+						for i := uint32(0); i < b; i++ {
 							// send request to socket
-							err := cons.Enqueue(&conn)
+							err := cons.Enqueue(conn)
 							if err != nil {
 								break loop
 							}
@@ -90,7 +94,7 @@ loop:
 					}
 				case CommandCancel:
 					{
-						err := cons.Cancel(&conn)
+						err := cons.Cancel(conn)
 						if err != nil {
 							break loop
 						}
@@ -106,28 +110,27 @@ loop:
 				}
 				p.UpdatePeer(msg) // updates peer metadata
 
-				if cons.CanRequest() && !p.Conn.PeerChoking { // can send a request
-					sched.SendRequest(p.Conn.Bitfield, slot)
-					cons.Waiting = true
-				}
-
 				// Only update event is Piece status, Bitfield is only sent on first message
 				if msg.Type() == Peer.Piece {
 					cons.AddBlock(msg)
 					if cons.Full() { // piece has been retrieved
 						piece, err := cons.Verify(sched.Torrent.Pieces[cons.PieceIndex])
 						if err != nil {
-							break
+							break loop
 						}
 						sched.SendSuccess(cons.PieceIndex, piece, slot)
 						cons.Clear()
 					} else {
-						err := cons.Enqueue(&conn) // fill the pipeline
+						err := cons.Enqueue(conn) // re-fill the pipeline
 						if err != nil {
 							break loop
 						}
 					}
 				}
+			}
+		default: // in idle we can just request
+			if cons.CanRequest(p.Conn.PeerChoking) { // can send a request
+				sched.SendRequest(p.Conn.Bitfield, slot)
 			}
 		}
 	}
@@ -157,7 +160,7 @@ with no request made
 
 TODO : maybe don't make this a method of the scheduler
 */
-func (sched TorrentScheduler) peerFirstMsg(msg Peer.PeerMessage, slot PeerSlot, readch chan Peer.PeerMessage) {
+func (sched *TorrentScheduler) peerFirstMsg(msg Peer.PeerMessage, slot PeerSlot, readch chan Peer.PeerMessage) {
 	switch msg.Type() {
 	case Peer.Bitfield:
 		t := msg.(*Peer.PeerBitfield)

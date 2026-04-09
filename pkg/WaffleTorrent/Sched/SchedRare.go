@@ -2,6 +2,7 @@ package Sched
 
 import (
 	"container/heap"
+	"log"
 )
 
 /*
@@ -38,22 +39,27 @@ also need to allow iteration over elements
 ( i am not a brony!! )*/
 
 // RQueue : Global rarity queue, don't really want to attach its lifespan to the scheduler object so lets make it global
-var RQueue *RarityQueue = new(RarityQueue)
+var RQueue *RarityQueue
 var RItem []*PieceItem // maps index to piece items
 
 func InitRQueue(PieceCount int) {
+	RQueue = new(RarityQueue)
 	RItem = make([]*PieceItem, PieceCount)
 	for i := 0; i < PieceCount; i++ {
 		RItem[i] = new(PieceItem)
 		RItem[i].Index = i
+		RItem[i].Rarity = 0
 
 		RQueue.Push(RItem[i])
 	}
 }
 
 // Rarity : Calculate the rarity based on the
-func (sched TorrentScheduler) Rarity(index int) {
-	RItem[index].Rarity = 1 / (float64(sched.Holders[index]) * (float64(sched.InFlight[index]) + 1))
+func (sched *TorrentScheduler) Rarity(index int) {
+	temp := float64(sched.Holders[index]) * (float64(sched.InFlight[index]) + 1)
+	if sched.Holders[index] != 0 {
+		RItem[index].Rarity = 1 / temp
+	}
 	RQueue.Update(RItem[index])
 }
 
@@ -107,12 +113,14 @@ func (pq *RarityQueue) Update(item *PieceItem) {
 	heap.Fix(pq, item.heapIndex)
 }
 
-func (sched TorrentScheduler) scheduleRare(request *PeerRequest) {
+func (sched *TorrentScheduler) scheduleRare(request *PeerRequest) {
+	// iterates over PQ, finds rarest piece that the scheduler has
 	for _, item := range *RQueue {
 		if sched.Bitfield[item.Index] {
 			continue
 		}
 		if request.Bitfield[item.Index] {
+			log.Printf("Peer %d assigned piece %d", request.PeerSlot, item.Index)
 			sched.PeerChan[request.PeerSlot] <- &PeerCommand{
 				Command: CommandGet,
 				Piece:   item.Index,
