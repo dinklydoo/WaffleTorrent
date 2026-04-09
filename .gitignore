@@ -25,7 +25,6 @@ go.work
 go.work.sum
 *.bin
 *.log
-WaffleTorrent
 
 # env file
 .env
