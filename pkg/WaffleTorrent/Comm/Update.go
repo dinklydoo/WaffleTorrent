@@ -13,12 +13,12 @@ const (
 type PeerUpdate struct {
 	UpdateType UpdateType
 	PeerSlot   PeerSlot
-	Piece      int     // piece index
-	Bitfield   *[]bool // bitfield -> empty on non bitfield updates
-	BlockData  *[]byte // non-empty on success message
+	Piece      int    // piece index
+	Bitfield   []bool // bitfield -> empty on non bitfield updates
+	BlockData  []byte // non-empty on success message
 }
 
-func UpdateSuccess(slot int, piece int, bdata *[]byte) *PeerUpdate {
+func UpdateSuccess(slot int, piece int, bdata []byte) *PeerUpdate {
 	return &PeerUpdate{
 		UpdateType: PeerSuccess,
 		PeerSlot:   PeerSlot(slot),
@@ -38,7 +38,7 @@ func UpdateFailed(slot int, piece int) *PeerUpdate {
 	}
 }
 
-func UpdateBitfield(slot int, bitfield *[]bool) *PeerUpdate {
+func UpdateBitfield(slot int, bitfield []bool) *PeerUpdate {
 	return &PeerUpdate{
 		UpdateType: PeerBitfield,
 		PeerSlot:   PeerSlot(slot),
@@ -48,7 +48,7 @@ func UpdateBitfield(slot int, bitfield *[]bool) *PeerUpdate {
 	}
 }
 
-func UpdateDetached(slot int, bitfield *[]bool) *PeerUpdate {
+func UpdateDetached(slot int, bitfield []bool) *PeerUpdate {
 	return &PeerUpdate{
 		UpdateType: PeerDied,
 		PeerSlot:   PeerSlot(slot),

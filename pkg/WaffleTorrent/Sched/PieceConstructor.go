@@ -9,7 +9,7 @@ import (
 	"net"
 )
 
-const maxBuffered = 6 // max requests to a peer at a time
+const maxBuffered = 10 // max requests to a peer at a time
 
 type PieceConstructor struct {
 	PieceIndex int
@@ -94,12 +94,12 @@ func (p *PieceConstructor) AddBlock(msg Peer.PeerMessage) {
 	p.Inflight--
 }
 
-func (p *PieceConstructor) Verify(hash *[20]byte) (*[]byte, error) {
+func (p *PieceConstructor) Verify(hash *[20]byte) ([]byte, error) {
 	flat := p.piece()
 	sha := sha1.Sum(flat)
 
 	if bytes.Compare(sha[:], hash[:]) != 0 {
 		return nil, fmt.Errorf("PieceConstructor Verify: hash mismatch")
 	}
-	return &flat, nil
+	return flat, nil
 }

@@ -4,6 +4,7 @@ import (
 	"WaffleTorrent/pkg/WaffleTorrent/Peer"
 	"encoding/binary"
 	"net"
+	"time"
 )
 
 func RequestBlock(conn net.Conn, piece int, start uint32, length uint32) error {
@@ -25,6 +26,7 @@ func sendBlock(conn net.Conn, request Peer.MessageType, index int, begin uint32,
 	binary.BigEndian.PutUint32(req[9:13], begin)
 	binary.BigEndian.PutUint32(req[13:], length)
 
+	conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	_, err := conn.Write(req)
 	if err != nil {
 		return err

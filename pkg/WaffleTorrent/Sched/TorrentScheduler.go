@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	maxPeers    = 100
-	maxUpdates  = 250
+	maxPeers    = 20
+	maxUpdates  = 80
 	maxCommands = 10
 )
 
@@ -26,6 +26,7 @@ func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, peer
 		PieceFile:  InitPieceFile(int64(torrent.Length)),
 		Bitfield:   make([]bool, pieceCount),
 		PieceCount: pieceCount,
+		WriteBuf:   0,
 
 		UpdateChan:  make(chan *Comm.PeerUpdate, maxUpdates),
 		RequestChan: make(chan *Comm.PeerRequest, maxPeers),
@@ -79,6 +80,7 @@ func RunPeerConnections(peers []Peer.Peer, sched *TorrentScheduler, peerId strin
 			if sched.PeerChan[id] == nil {
 				sched.PeerChan[id] = make(chan *Comm.PeerCommand, maxCommands)
 			}
+			log.Printf("socket: %v assigned slot %d", p.IP, id)
 			err := sched.HandlePeer(&peer, peerId, id)
 			if err != nil {
 				log.Printf("Error handling peer %v: %v", peer, err)
@@ -144,13 +146,20 @@ func (sched *TorrentScheduler) updateSchedule(update *Comm.PeerUpdate) error {
 	return nil
 }
 
-func (sched *TorrentScheduler) writePiece(piece int, data *[]byte) error {
+func (sched *TorrentScheduler) writePiece(piece int, data []byte) error {
 	offset := uint32(piece) * sched.Torrent.PieceLength
 
-	//end := min(offset+sched.Torrent.PieceLength, sched.Torrent.Length)
-	_, err := sched.PieceFile.WriteAt((*data)[:], int64(offset))
+	_, err := sched.PieceFile.WriteAt(data[:], int64(offset))
 	if err != nil {
 		return err
+	}
+
+	sched.WriteBuf++
+	if sched.WriteBuf%10 == 0 || sched.WriteBuf == sched.PieceCount {
+		err = sched.PieceFile.Sync()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -159,8 +168,9 @@ func (sched *TorrentScheduler) handleRequest(request *Comm.PeerRequest) {
 	pidx := rarityQueue.RequestRare(request)
 	if pidx < 0 {
 		sched.PeerChan[request.PeerSlot] <- Comm.KillCommand()
+	} else {
+		sched.PeerChan[request.PeerSlot] <- Comm.GetCommand(pidx)
 	}
-	sched.PeerChan[request.PeerSlot] <- Comm.GetCommand(pidx)
 }
 
 func (sched *TorrentScheduler) Finished() bool {

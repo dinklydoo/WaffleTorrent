@@ -46,10 +46,10 @@ func (bucket *Bucket) Remove(piece *PieceItem) {
 	piece.prev = nil
 }
 
-func (bucket *Bucket) GetPiece(bitfield *[]bool) int {
+func (bucket *Bucket) GetPiece(bitfield []bool) int {
 	curr := bucket.head
 	for curr != nil {
-		if (*bitfield)[curr.Index] {
+		if bitfield[curr.Index] {
 			return curr.Index
 		}
 		curr = curr.next

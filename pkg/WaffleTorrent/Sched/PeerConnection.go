@@ -89,6 +89,7 @@ loop:
 							// send request to socket
 							err := cons.Enqueue(conn)
 							if err != nil {
+								log.Printf("enqueue failed 1: %s", err)
 								break loop
 							}
 						}
@@ -107,6 +108,7 @@ loop:
 		case msg, ok := <-readch:
 			{
 				if !ok {
+					log.Printf("peer %s disconnected", p.ID)
 					break loop
 				}
 				p.UpdatePeer(msg) // updates peer metadata
@@ -124,6 +126,7 @@ loop:
 					} else {
 						err := cons.Enqueue(conn) // re-fill the pipeline
 						if err != nil {
+							log.Printf("enqueue failed 2: %s", err)
 							break loop
 						}
 					}
@@ -131,7 +134,7 @@ loop:
 			}
 		default: // in idle we can just request
 			if cons.CanRequest(p.Conn.PeerChoking) { // can send a request
-				sched.SendRequest(&p.Conn.Bitfield, slot)
+				sched.SendRequest(p.Conn.Bitfield, slot)
 			}
 		}
 	}
@@ -165,13 +168,13 @@ func (sched *TorrentScheduler) peerFirstMsg(msg Peer.PeerMessage, slot int, read
 	switch msg.Type() {
 	case Peer.Bitfield:
 		t := msg.(*Peer.PeerBitfield)
-		sched.UpdateChan <- Comm.UpdateBitfield(slot, &t.Bitfield)
+		sched.UpdateChan <- Comm.UpdateBitfield(slot, t.Bitfield)
 	default: // peer is a seeder
 		seed := make([]bool, sched.PieceCount)
 		for i := range seed {
 			seed[i] = true
 		}
-		sched.UpdateChan <- Comm.UpdateBitfield(slot, &seed)
+		sched.UpdateChan <- Comm.UpdateBitfield(slot, seed)
 		readch <- msg // enqueue the message again
 	}
 }

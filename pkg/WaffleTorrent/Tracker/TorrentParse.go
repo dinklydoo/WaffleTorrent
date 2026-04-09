@@ -47,10 +47,10 @@ import (
 	"https://github.com/zeebo/bencode"
 */
 
-func ParseTorrent(data *[]byte) (*WaffleTorrent.Torrent, error) {
+func ParseTorrent(data []byte) (*WaffleTorrent.Torrent, error) {
 
 	metadata := &Metadata{}
-	err := bencode.DecodeBytes(*data, metadata)
+	err := bencode.DecodeBytes(data, metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func ParseTorrentFromFile(path string) (*WaffleTorrent.Torrent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseTorrent(&file)
+	return ParseTorrent(file)
 }
 
 func toSHA1(data []byte) []byte {

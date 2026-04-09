@@ -13,12 +13,6 @@ THIS DOES NOT NEED TO BE THREAD SAFE, SCHEDULER HAS SINGLE POINT OF ACCESS !!!
 
 Implement each bucket as a doubly linked-list of Piece Items:
 	- Ensures Fast Insertion/Deletion O(1)
-		- 	Pure Updates do not directly affect the bucket of the piece (ie will not be reinserted to a new bucket)
-			Instead they only change the piece items fields for holders/inflight requests
-
-		-	On Piece Retrieval or operations that require the bucket of a piece it will revalidate the position of the piece,
-			if the piece does not belong to this bucket it will perform the reinsertion, otherwise it continues the operation
-			(Lazy update of buckets )
 
 	-	To prevent duplicate requests, if after requesting a piece falls into the same bucket
 		reinsert to the back
@@ -64,9 +58,9 @@ func NewRarityQueue(pieces int) *RarityQueue {
 	return &rq
 }
 
-func (rq *RarityQueue) AttachPeer(bitfield *[]bool) {
+func (rq *RarityQueue) AttachPeer(bitfield []bool) {
 	rq.peers++
-	for i, b := range *bitfield {
+	for i, b := range bitfield {
 		if b {
 			rq.IncHolder(i)
 		}
@@ -80,19 +74,6 @@ func (rq *RarityQueue) rarity(piece int) float64 {
 	return float64(rq.peers-holders) / float64(rq.peers*(inflight+1))
 }
 
-func (rq *RarityQueue) validateBucket(piece int) bool {
-	rarity := rq.rarity(piece)
-	idx := int(BucketSize - min(BucketSize, 1+math.Floor(rarity*BucketSize)))
-	item := rq.items[piece]
-	if item.Bucket != idx { // lazy validation of a bucket get
-		curr := rq.buckets[item.Bucket] // old bucket that is invalid
-		curr.Remove(item)
-		rq.buckets[idx].Insert(item)
-		return false
-	}
-	return true
-}
-
 func (rq *RarityQueue) getBucket(piece int) *Bucket {
 	rarity := rq.rarity(piece)
 	idx := int(BucketSize - min(BucketSize, 1+math.Floor(rarity*BucketSize)))
@@ -100,13 +81,39 @@ func (rq *RarityQueue) getBucket(piece int) *Bucket {
 }
 
 func (rq *RarityQueue) IncHolder(piece int) {
+	if rq.items[piece] == nil {
+		return
+	}
 	item := rq.items[piece]
 	item.Availability++
+	rq.update(piece)
 }
 
 func (rq *RarityQueue) DecHolder(piece int) {
+	if rq.items[piece] == nil {
+		return
+	}
 	item := rq.items[piece]
 	item.Availability--
+	rq.update(piece)
+}
+
+func (rq *RarityQueue) IncFlight(piece int) {
+	if rq.items[piece] == nil {
+		return
+	}
+	item := rq.items[piece]
+	item.InFlight++
+	rq.update(piece)
+}
+
+func (rq *RarityQueue) DecFlight(piece int) {
+	if rq.items[piece] == nil {
+		return
+	}
+	item := rq.items[piece]
+	item.InFlight--
+	rq.update(piece)
 }
 
 func (rq *RarityQueue) update(piece int) {
@@ -117,28 +124,13 @@ func (rq *RarityQueue) update(piece int) {
 	rq.getBucket(piece).Insert(item)
 }
 
-func (rq *RarityQueue) updateRequest(piece int, incr bool) {
-	// assert: piece reflects the correct bucket -> enforced by request rare candidate check
-	item := rq.items[piece]
-	rq.buckets[item.Bucket].Remove(item)
-	if incr {
-		item.InFlight++
-	} else {
-		item.InFlight--
-	}
-	rq.getBucket(piece).Insert(item)
-}
-
 func (rq *RarityQueue) RequestRare(request *Comm.PeerRequest) int {
 	for _, bucket := range rq.buckets {
 		candidate := bucket.GetPiece(request.Bitfield)
 		if candidate < 0 { // didn't find a valid piece
 			continue
 		}
-		if !rq.validateBucket(candidate) { // invalid piece -> revalidate
-			continue
-		}
-		rq.updateRequest(candidate, true) // either -> place to lower bucket or replace at the end of same bucket
+		rq.IncFlight(candidate)
 		return candidate
 	}
 	return -1
@@ -148,7 +140,7 @@ func (rq *RarityQueue) RequestFailed(piece int) {
 	if rq.items[piece] == nil {
 		return
 	}
-	rq.updateRequest(piece, false) // decrease inflight and reorder
+	rq.DecFlight(piece)
 }
 
 func (rq *RarityQueue) RequestSuccess(piece int) {
