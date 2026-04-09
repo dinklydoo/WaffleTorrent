@@ -2,7 +2,9 @@ package Sched
 
 import (
 	"WaffleTorrent/pkg/WaffleTorrent"
+	"WaffleTorrent/pkg/WaffleTorrent/Comm"
 	"WaffleTorrent/pkg/WaffleTorrent/Peer"
+	"WaffleTorrent/pkg/WaffleTorrent/SchedRare"
 	"log"
 	"net"
 	"os"
@@ -14,20 +16,20 @@ const (
 	maxCommands = 10
 )
 
+var rarityQueue *SchedRare.RarityQueue
+
 func RunTorrentScheduler(torrent *WaffleTorrent.Torrent, peers []Peer.Peer, peerId string, listener *net.Listener) error {
 	pieceCount := len(torrent.Pieces)
-	InitRQueue(pieceCount)
+	rarityQueue = SchedRare.NewRarityQueue(len(torrent.Pieces))
 	sched := &TorrentScheduler{
 		Torrent:    torrent,
 		PieceFile:  InitPieceFile(int64(torrent.Length)),
 		Bitfield:   make([]bool, pieceCount),
-		Holders:    make([]int, pieceCount),
-		InFlight:   make([]int, pieceCount),
 		PieceCount: pieceCount,
 
-		UpdateChan:  make(chan *PeerUpdate, maxUpdates),
-		RequestChan: make(chan *PeerRequest, maxPeers),
-		PeerChan:    make([]chan *PeerCommand, maxPeers),
+		UpdateChan:  make(chan *Comm.PeerUpdate, maxUpdates),
+		RequestChan: make(chan *Comm.PeerRequest, maxPeers),
+		PeerChan:    make([]chan *Comm.PeerCommand, maxPeers),
 		ActiveChan:  make([]bool, maxPeers),
 	}
 	// setup logfile
@@ -75,9 +77,9 @@ func RunPeerConnections(peers []Peer.Peer, sched *TorrentScheduler, peerId strin
 				ch <- id
 			}()
 			if sched.PeerChan[id] == nil {
-				sched.PeerChan[id] = make(chan *PeerCommand, maxCommands)
+				sched.PeerChan[id] = make(chan *Comm.PeerCommand, maxCommands)
 			}
-			err := sched.HandlePeer(&peer, peerId, PeerSlot(id))
+			err := sched.HandlePeer(&peer, peerId, id)
 			if err != nil {
 				log.Printf("Error handling peer %v: %v", peer, err)
 			}
@@ -110,57 +112,55 @@ func InitPieceFile(fileSize int64) *os.File {
 	return file
 }
 
-func (sched *TorrentScheduler) updateSchedule(update *PeerUpdate) error {
+func (sched *TorrentScheduler) updateSchedule(update *Comm.PeerUpdate) error {
 	flag := update.UpdateType
 	switch flag {
-	case PeerBitfield:
-		for i, have := range update.Bitfield {
-			if have {
-				sched.Holders[i]++
-				sched.Rarity(i)
+	case Comm.PeerBitfield:
+		for i := 0; i < len(sched.Bitfield); i++ {
+			if sched.Bitfield[i] {
+				rarityQueue.IncHolder(i)
 			}
 		}
-	case PeerSuccess:
-		if sched.Bitfield[update.Piece] { // someone was faster
-			break
-		}
+	case Comm.PeerSuccess:
 		sched.Bitfield[update.Piece] = true
-		sched.InFlight[update.Piece]--
-		RQueue.Delete(RItem[update.Piece]) // delete from the queue
+		rarityQueue.RequestSuccess(update.Piece)
+
 		err := sched.writePiece(update.Piece, update.BlockData)
 		if err != nil {
 			return err
 		}
-	case PeerFailed:
-		sched.InFlight[update.Piece]--
-		sched.Rarity(update.Piece)
-	case PeerDied:
-		for i, have := range update.Bitfield {
-			if have {
-				sched.Holders[i]--
-				sched.Rarity(i)
+	case Comm.PeerFailed:
+		rarityQueue.RequestFailed(update.Piece)
+	case Comm.PeerDied:
+		for i := 0; i < len(sched.Bitfield); i++ {
+			if sched.Bitfield[i] {
+				rarityQueue.DecHolder(i)
 			}
 		}
 		sched.ActiveChan[update.PeerSlot] = false
-	case PeerAttached:
+	case Comm.PeerAttached:
 		sched.ActiveChan[update.PeerSlot] = true
 	}
 	return nil
 }
 
-func (sched *TorrentScheduler) writePiece(piece int, data []byte) error {
+func (sched *TorrentScheduler) writePiece(piece int, data *[]byte) error {
 	offset := uint32(piece) * sched.Torrent.PieceLength
 
 	//end := min(offset+sched.Torrent.PieceLength, sched.Torrent.Length)
-	_, err := sched.PieceFile.WriteAt(data[:], int64(offset))
+	_, err := sched.PieceFile.WriteAt((*data)[:], int64(offset))
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (sched *TorrentScheduler) handleRequest(request *PeerRequest) {
-	sched.scheduleRare(request) // TODO : endgame heuristic
+func (sched *TorrentScheduler) handleRequest(request *Comm.PeerRequest) {
+	pidx := rarityQueue.RequestRare(request)
+	if pidx < 0 {
+		sched.PeerChan[request.PeerSlot] <- Comm.KillCommand()
+	}
+	sched.PeerChan[request.PeerSlot] <- Comm.GetCommand(pidx)
 }
 
 func (sched *TorrentScheduler) Finished() bool {

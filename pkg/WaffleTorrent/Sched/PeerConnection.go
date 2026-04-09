@@ -2,6 +2,7 @@ package Sched
 
 import (
 	"WaffleTorrent/pkg/WaffleTorrent"
+	"WaffleTorrent/pkg/WaffleTorrent/Comm"
 	"WaffleTorrent/pkg/WaffleTorrent/Peer"
 	"bufio"
 	"fmt"
@@ -11,7 +12,7 @@ import (
 )
 
 // HandlePeer : this function handles all the peer logic -- runs in a SEPERATE goroutine
-func (sched *TorrentScheduler) HandlePeer(p *Peer.Peer, peerId string, slot PeerSlot) error {
+func (sched *TorrentScheduler) HandlePeer(p *Peer.Peer, peerId string, slot int) error {
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", p.IP, p.Port))
 	if err != nil {
 		return err
@@ -79,7 +80,7 @@ loop:
 					break loop
 				}
 				switch cmd.Command {
-				case CommandGet:
+				case Comm.CommandGet:
 					{
 						log.Printf("%s received command GET %d", p.ID, cmd.Piece)
 						b := min(sched.Torrent.PieceLength/WaffleTorrent.BlockSize, maxBuffered)
@@ -92,14 +93,14 @@ loop:
 							}
 						}
 					}
-				case CommandCancel:
+				case Comm.CommandCancel:
 					{
 						err := cons.Cancel(conn)
 						if err != nil {
 							break loop
 						}
 					}
-				case CommandKill:
+				case Comm.CommandKill:
 					break loop // literally just kill ourselves
 				}
 			}
@@ -114,7 +115,7 @@ loop:
 				if msg.Type() == Peer.Piece {
 					cons.AddBlock(msg)
 					if cons.Full() { // piece has been retrieved
-						piece, err := cons.Verify(sched.Torrent.Pieces[cons.PieceIndex])
+						piece, err := cons.Verify(&sched.Torrent.Pieces[cons.PieceIndex])
 						if err != nil {
 							break loop
 						}
@@ -130,7 +131,7 @@ loop:
 			}
 		default: // in idle we can just request
 			if cons.CanRequest(p.Conn.PeerChoking) { // can send a request
-				sched.SendRequest(p.Conn.Bitfield, slot)
+				sched.SendRequest(&p.Conn.Bitfield, slot)
 			}
 		}
 	}
@@ -160,25 +161,17 @@ with no request made
 
 TODO : maybe don't make this a method of the scheduler
 */
-func (sched *TorrentScheduler) peerFirstMsg(msg Peer.PeerMessage, slot PeerSlot, readch chan Peer.PeerMessage) {
+func (sched *TorrentScheduler) peerFirstMsg(msg Peer.PeerMessage, slot int, readch chan Peer.PeerMessage) {
 	switch msg.Type() {
 	case Peer.Bitfield:
 		t := msg.(*Peer.PeerBitfield)
-		sched.UpdateChan <- &PeerUpdate{
-			UpdateType: PeerBitfield,
-			PeerSlot:   slot,
-			Bitfield:   t.Bitfield,
-		}
+		sched.UpdateChan <- Comm.UpdateBitfield(slot, &t.Bitfield)
 	default: // peer is a seeder
 		seed := make([]bool, sched.PieceCount)
 		for i := range seed {
 			seed[i] = true
 		}
-		sched.UpdateChan <- &PeerUpdate{
-			UpdateType: PeerBitfield,
-			PeerSlot:   slot,
-			Bitfield:   seed,
-		}
+		sched.UpdateChan <- Comm.UpdateBitfield(slot, &seed)
 		readch <- msg // enqueue the message again
 	}
 }

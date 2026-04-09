@@ -94,12 +94,12 @@ func (p *PieceConstructor) AddBlock(msg Peer.PeerMessage) {
 	p.Inflight--
 }
 
-func (p *PieceConstructor) Verify(hash [20]byte) ([]byte, error) {
+func (p *PieceConstructor) Verify(hash *[20]byte) (*[]byte, error) {
 	flat := p.piece()
 	sha := sha1.Sum(flat)
 
 	if bytes.Compare(sha[:], hash[:]) != 0 {
 		return nil, fmt.Errorf("PieceConstructor Verify: hash mismatch")
 	}
-	return flat, nil
+	return &flat, nil
 }
