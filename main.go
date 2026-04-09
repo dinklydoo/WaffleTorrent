@@ -1,6 +1,7 @@
 package main
 
 import (
+	"WaffleTorrent/pkg/WaffleTorrent/File"
 	"WaffleTorrent/pkg/WaffleTorrent/Sched"
 	"WaffleTorrent/pkg/WaffleTorrent/Tracker"
 	"fmt"
@@ -41,6 +42,10 @@ func main() {
 	}
 
 	err = Sched.RunTorrentScheduler(torrent, peers, peerId, &listener)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = File.FormatPieces(torrent)
 	if err != nil {
 		log.Fatal(err)
 	}
